@@ -31,7 +31,7 @@ done
 mkdir -p "$LOCAL_DIR"
 rclone mkdir "$REMOTE_DIR" 2>/dev/null || true
 
-get_mime() {
+get_extension() {
     local file_path
     file_path="$1"
     local mime
@@ -39,7 +39,7 @@ get_mime() {
     echo "$mime"
 }
 
-read_extension() {
+assign_extension() {
     local file_path
     file_path="$1"
     local original_name
