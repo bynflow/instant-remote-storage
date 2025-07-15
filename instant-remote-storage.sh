@@ -91,9 +91,7 @@ clean_fname() {
 
 # Fase 1 - NUOVO FILE NELLA CARTELLA
 inotifywait -m \
-    -e create \
     -e moved_to \
-    -e modify \
     -e close_write \
     --format '%f' \
     "$LOCAL_DIR" | while read -r FILENAME; do
