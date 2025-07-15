@@ -14,6 +14,7 @@ set -euo pipefail
 # with checksum-based conflict resolution.
 # ========================================
 
+# === 0 PHASE - INITIAL SETTING ===
 LOCAL_DIR="$HOME/storage-remoto-nextcloud"
 REMOTE_DIR="hetzner-nc:indifferenziato"
 
@@ -31,6 +32,8 @@ done
 mkdir -p "$LOCAL_DIR"
 rclone mkdir "$REMOTE_DIR" 2>/dev/null || true
 
+# === 1 PHASE - DEFINING FUNCTIONS ===
+# Getting file type (mime)
 get_extension() {
     local file_path
     file_path="$1"
@@ -39,6 +42,7 @@ get_extension() {
     echo "$mime"
 }
 
+# Assigning suffix if missing
 assign_extension() {
     local file_path
     file_path="$1"
@@ -69,6 +73,7 @@ assign_extension() {
     fi
 }
 
+# Cleaning filenames
 clean_fname() {
     local file_path
     file_path="$1"
@@ -89,7 +94,7 @@ clean_fname() {
     echo "$new_name"
 }
 
-# Fase 1 - NUOVO FILE NELLA CARTELLA
+# === 2 PHASE - DETECTING -> RENAMING -> UPLOADING NEW FILES IN THE FOLDER ===
 inotifywait -m \
     -e moved_to \
     -e close_write \
@@ -105,9 +110,9 @@ inotifywait -m \
         EXISTING_HASH=$(rclone md5sum "$REMOTE_PATH" 2>/dev/null | awk '{print $1}' || echo "")
 
         # Check if file has extension
-        NEW_FILENAME=$(read_extension "$LOCAL_FILE")
+        NEW_FILENAME=$(assign_extension "$LOCAL_FILE")
 
-        # Get a save filename
+        # RENAMING - Get a save filename
         SAVE_FILENAME=$(clean_fname "$NEW_FILENAME")
 
         if [[ "$SAVE_FILENAME" != "$FILENAME" ]]; then
@@ -117,7 +122,7 @@ inotifywait -m \
             REMOTE_PATH="$REMOTE_DIR/$FILENAME"
         fi
 
-        # Fase 2 - CLONA FILE IN REMOTO
+        # UPLOADING - Copy to remote
         if [[ -z "$EXISTING_HASH" ]]; then
             # No remote file → copy directly
             rclone copyto "$LOCAL_FILE" "$REMOTE_PATH"
