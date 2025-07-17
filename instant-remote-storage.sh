@@ -312,6 +312,11 @@ clean_name() {
     echo "$new_name"
 }
 
+# === TRAPS ===
+trap 'log_error "Unhandled error at line $LINENO: command \`$BASH_COMMAND\` exited with $?"; send_error_mail' ERR
+trap 'log_info "instant-remote-storage exited at $(date "+%Y-%m-%d %H:%M:%S")"' EXIT
+trap 'log_warning "Script interrupted (SIGINT or SIGTERM). Exiting..."; exit 130' INT TERM
+
 # === 2 PHASE - DETECTING -> RENAMING -> UPLOADING NEW FILES IN THE FOLDER ===
 inotifywait -m \
     -e moved_to \
