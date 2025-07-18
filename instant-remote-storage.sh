@@ -217,7 +217,7 @@ assign_extension() {
         return 42
     }
 
-    ext="${MIME_EXTENSIONS[$mime]}"
+    ext="${MIME_EXTENSIONS[$mime]:-}"
     [[ -z "$ext" ]] && {
         log_warning "MIME '$mime' not mapped. Skipping extension assignment."
         echo "$original_name"
@@ -270,20 +270,28 @@ trap 'log_warning "Script interrupted. Exiting..."; exit 130' INT TERM
 # === Main Loop: Watches for new or closed files ===
 # Uses inotifywait to monitor local directory
 # On file write or move completion, reacts to each event
-inotifywait -m \
-    -e moved_to \
-    -e close_write \
-    --format '%f' \
-    "$LOCAL_DIR" | while read -r FILENAME; do
-
-    LOCAL_FILE="$LOCAL_DIR/$FILENAME"
+while IFS=":::" read -r FULLPATH EVENT; do
+    FILENAME=$(basename "$FULLPATH")
+    LOCAL_FILE="$FULLPATH"
     REMOTE_PATH="$REMOTE_DIR/$FILENAME"
+    # per debug
+    echo "sono qui"
+
+    log_debug "📥 Event '$EVENT' received for: $FILENAME"
+    # Process only CLOSE_WRITE or MOVED_TO (not both)
+    if [[ "$EVENT" == *MOVED_TO* ]]; then
+        log_debug "🔁 Skipping redundant MOVED_TO event for already existing file: $FILENAME"
+        continue
+    fi
 
     # Skip unwanted files: hidden dotfiles or temporary editor files
     [[ "$FILENAME" == .goutputstream* || "$FILENAME" =~ ^\.[^./]*$ ]] && {
         log_warning "Skipping unsupported file: '$FILENAME'"
         continue
     }
+
+    # temporaneo per sviluppo
+    sleep 2
 
     [[ ! -f "$LOCAL_FILE" ]] && {
         log_error "File not found: '$LOCAL_FILE'"
@@ -302,8 +310,11 @@ inotifywait -m \
     EXISTING_HASH=$(rclone md5sum "$REMOTE_PATH" 2>/dev/null | awk '{print $1}' || true)
 
     # Try to assign new extension (based on MIME), if needed
-    NEW_FILENAME=$(assign_extension "$LOCAL_FILE")
-    ASSIGN_EXIT_CODE=$?
+    if ! NEW_FILENAME=$(assign_extension "$LOCAL_FILE"); then
+        ASSIGN_EXIT_CODE=$?
+    else
+        ASSIGN_EXIT_CODE=0
+    fi
 
     # Rename local file if new filename differs (extension corrected, sanitized)
     if [[ "$ASSIGN_EXIT_CODE" -ne 42 ]]; then
@@ -349,5 +360,7 @@ inotifywait -m \
             send_error_mail
         fi
     fi
-done
+done < <(
+    inotifywait -m -e close_write -e moved_to --format '%w%f:::%e' "$LOCAL_DIR"
+)
 
