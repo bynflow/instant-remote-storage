@@ -1,75 +1,53 @@
 #!/usr/bin/env bash
 
 # ========================================
-# instant-remote-storage - v0.1.0
-# Ultima modifica: 2025-07-11
-# === Informazioni autore ===
+# instant-remote-storage - v0.1.2
 # Author : Carlo Capobianchi (bynflow)
 # GitHub : https://github.com/bynflow
-# Year   : 2025
-# ======================
-# ======================
-# Watch $HOME/storage-remoto-nextcloud and sync to hetzner-nc:indifferenziato
-# with checksum-based conflict resolution.
+# Last Modified: 2025-07-17
+# ========================================
+# Watches $HOME/storage-remoto-nextcloud and syncs files to
+# hetzner-nc:indifferenziato with MIME-based renaming and
+# checksum-based conflict resolution.
 # ========================================
 
+set -euo pipefail  # Stop on error, unset variables, or pipe failures
 
-# === 0 PHASE - INITIAL SETTING ===
-set -euo pipefail
-
-# === Logging settings ===
+# === Logging functions ===
 LOG_TAG="instant-remote-storage"
-DEBUG="1"  # Imposta a "1" per abilitare log DEBUG dettagliati
+DEBUG="1"  # Set to "1" to enable verbose debug logs
 
-log_info() {
-    logger -t "$LOG_TAG" "[INFO]    $*;"
-}
+log_info()    { logger -t "$LOG_TAG" "[INFO]    $*;"; }
+log_debug()   { [[ "$DEBUG" == "1" ]] && logger -t "$LOG_TAG" "[DEBUG]   $*"; }
+log_warning() { logger -t "$LOG_TAG" "[WARNING] $*"; }
+log_error()   { logger -t "$LOG_TAG" "[ERROR]   $*"; }
 
-log_debug()   {
-    [[ "$DEBUG" == "1" ]] && logger -t "$LOG_TAG" "[DEBUG]   $*";
-}
-
-log_warning() {
-    logger -t "$LOG_TAG" "[WARNING] $*";
-}
-
-log_error()   {
-    logger -t "$LOG_TAG" "[ERROR]   $*";
-}
-
-# Send an error email with last 50 log lines from journalctl
-# Requires: ~/.msmtprc and msmtp configured
-# Triggered only when something fails during execution
+# === Send error report via email if msmtp is configured ===
 send_error_mail() {
-    # Check that ~/.msmtprc exists and is not empty
     if [[ ! -s "$HOME/.msmtprc" ]]; then
-        local warn_msg="⚠️ Missing or empty ~/.msmtprc. Email notification disabled."
-        log_warning "$warn_msg"
-        return 0  # Do not block the script
+        log_warning "⚠️ Missing or empty ~/.msmtprc. Email disabled."
+        return 0
     fi
 
     local subject
     subject="❌ Error in instant-remote-storage on $(hostname) - $(date '+%Y-%m-%d %H:%M:%S')"
-
     local recipient
     recipient="amminflow@gmail.com"
+    local body_head body_tail
 
-    local body_head
-    body_head=$(
-        cat <<-EOF
-            Hello,
-            An error occurred during the execution of *instant-remote-storage*.
+    body_head=$(cat <<-EOF
+        Hello,
+        An error occurred during the execution of *instant-remote-storage*.
 
-            • Command: "$BASH_COMMAND"
-            • Line: $LINENO
-            • Exit code: $?
+        • Command: "$BASH_COMMAND"
+        • Line: $LINENO
+        • Exit code: $?
 
-            Below are the last 50 lines from the system journal:
+        Below are the last 50 lines from the system journal:
 
 EOF
-  )
+    )
 
-    local body_tail
     body_tail=$(journalctl --user -t "$LOG_TAG" -n 50 2>/dev/null || echo "⚠️ Could not read journal for tag $LOG_TAG")
 
     {
@@ -82,40 +60,43 @@ EOF
     } | msmtp --from=amminflow -t 2>/dev/null
 }
 
+# === Configuration variables ===
 LOCAL_DIR="$HOME/storage-remoto-nextcloud"
 REMOTE_DIR="hetzner-nc:indifferenziato"
 
+# Commands required by the script for execution
 REQUIRED_CMDS=(rclone inotifywait md5sum date grep find awk mapfile msmtp)
 
-# Ensure prerequisites
+# === Preflight checks ===
+# Ensure all required commands exist
 for cmd in "${REQUIRED_CMDS[@]}"; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
-        log_error "Required command '$cmd' not found. Please install it."
+        log_error "Missing required command: '$cmd'"
         send_error_mail
         exit 1
     fi
 done
 
 # Ensure local directory exists
-if ! mkdir -p "$LOCAL_DIR"; then
+mkdir -p "$LOCAL_DIR" || {
     log_error "Failed to create local directory: $LOCAL_DIR"
     send_error_mail
     exit 1
+}
+
+# Ensure remote directory is initialized
+if ! rclone mkdir "$REMOTE_DIR" 2>/dev/null; then
+    log_warning "Remote directory may not exist or cannot be created: $REMOTE_DIR"
 fi
 
+# Check remote connection
 if ! rclone lsf "$REMOTE_DIR" &>/dev/null; then
     log_error "Remote '$REMOTE_DIR' not reachable"
     send_error_mail
     exit 1
 fi
 
-if ! rclone mkdir "$REMOTE_DIR" 2>/dev/null; then
-    log_warning "Remote directory may not exist or cannot be created: $REMOTE_DIR"
-    # No exit: may already exist or still be writable
-fi
-
-
-# Maps known MIME types to single, simple file extensions
+# === MIME to extension map (placeholder) ===
 declare -A MIME_EXTENSIONS=(
     # Text
     ["text/plain"]="txt"
@@ -183,233 +164,190 @@ declare -A MIME_EXTENSIONS=(
     ["application/octet-stream"]="bin"
 )
 
-
-# List of known composite extensions used by clean_name and assign_extension
+# Composite extensions (e.g., .tar.gz)
 composite_exts=("tar.gz" "tar.bz2" "tar.xz" "tar.zst" "tar.lz4" "tar.br")
 
+# === Utility Functions ===
 
-# === 1 PHASE - DEFINING FUNCTIONS ===
-
-# Split a filename into base name and extension (supporting composite extensions)
-# Input : filename (e.g., "backup.tar.zst")
-# Output: "base:::ext" (e.g., "backup:::tar.zst")
+# Splits a filename into base and extension, preserving known composite extensions
 split_base_ext() {
     local filename="$1"
     for ext in "${composite_exts[@]}"; do
-        if [[ "$filename" == *".${ext}" ]]; then
+        [[ "$filename" == *".${ext}" ]] && {
             echo "${filename%."$ext"}:::${ext}"
             return
-        fi
+        }
     done
     echo "${filename%.*}:::${filename##*.}"
 }
 
-# Detect MIME type of a file using 'file --mime-type'
-# Input: file path
-# Output: MIME type string (e.g., "image/jpeg")
+# Determines MIME type using `file` command; skips empty files
 get_mime() {
-    local file_path
-    file_path="$1"
-    local mime
-
-    if [[ ! -s "$file_path" ]]; then
-        log_warning "'$file_path' is empty. Skipping MIME detection."
+    local file_path="$1"
+    [[ ! -s "$file_path" ]] && {
+        log_warning "'$file_path' is empty → skipped entirely (no upload attempt)."
         echo ""
         return
-    fi
-
-    mime=$(file --mime-type -b "$file_path")
-    echo "$mime"
+    }
+    file --mime-type -b "$file_path"
 }
 
-# Assign a proper extension based on MIME type if missing or wrong
-# Input: file path
-# Output: new filename with correct extension
+# Determines the correct extension based on MIME type
+# Returns new filename if extension is added or corrected
 assign_extension() {
-    local file_path="$1"
+    local file_path
+    file_path="$1"
     local original_name
     original_name=$(basename "$file_path")
 
-    # If file ends with a known composite extension, keep it as is
+    # Skip extension reassignment for composite types
     for ext in "${composite_exts[@]}"; do
-        if [[ "$original_name" == *".${ext}" ]]; then
-            log_debug "Composite extension '$ext' detected in '$original_name'. Keeping original name."
+        [[ "$original_name" == *".${ext}" ]] && {
+            log_debug "Composite extension '$ext' detected. Keeping original name."
             echo "$original_name"
             return 0
-        fi
+        }
     done
 
-    # Detect MIME type
-    local mime
+    local mime ext
     mime=$(get_mime "$file_path")
-
-    if [[ -z "$mime" ]]; then
-        log_warning "Could not detect MIME type for '$file_path'. Skipping extension assignment."
+    [[ -z "$mime" ]] && {
+        log_warning "MIME detection failed. Skipping extension assignment."
         echo "$original_name"
         return 42
-    fi
+    }
 
-    # Lookup extension from MIME type
-    local ext="${MIME_EXTENSIONS[$mime]}"
-
-    if [[ -z "$ext" ]]; then
-        log_warning "MIME type '$mime' for '$file_path' is not mapped. Skipping extension assignment."
+    ext="${MIME_EXTENSIONS[$mime]}"
+    [[ -z "$ext" ]] && {
+        log_warning "MIME '$mime' not mapped. Skipping extension assignment."
         echo "$original_name"
         return 42
-    fi
+    }
 
-    # Check if the filename already ends with the correct extension
-    if [[ "$original_name" == *".${ext}" ]]; then
-        echo "$original_name"
-    else
-        local new_name="${original_name}.${ext}"
-        echo "$new_name"
-    fi
+    # If file already has correct extension, return it; else, append correct extension
+    [[ "$original_name" == *".${ext}" ]] && echo "$original_name" || echo "${original_name}.${ext}"
 }
 
-# Normalize the filename: lowercase, remove special chars, clean dashes
-# Input: file path
-# Output: sanitized filename (e.g., "My File.txt" → "my-file.txt")
+# Sanitizes a filename:
+# - Converts to lowercase
+# - Replaces non-alphanumeric characters with hyphens
+# - Trims leading/trailing hyphens
+# - Preserves original extension
 clean_name() {
-    local file_path="$1"
+    local file_path
+    file_path="$1"
     local original_name
     original_name=$(basename "$file_path")
-    local base full_ext found
-
-    full_ext=""
-    base=""
+    local found
     found=0
+    local base full_ext
 
-    # Detect if the filename ends with a known composite extension
+    # Handle composite extensions
     for ext in "${composite_exts[@]}"; do
         if [[ "$original_name" == *".${ext}" ]]; then
             full_ext="$ext"
-            base="${original_name%."$ext"}"  # Remove the entire composite extension
+            base="${original_name%."$ext"}"
             found=1
             break
         fi
     done
 
-    # If no composite extension was found, fall back to standard logic
     if [[ "$found" -eq 0 ]]; then
         full_ext="${original_name##*.}"
         base="${original_name%.*}"
     fi
 
-    # Normalize and clean the base name:
-    # - Lowercase
-    # - Replace non-alphanumeric chars with hyphens
-    # - Trim leading/trailing hyphens
     local clean_base
-    clean_base=$(echo "$base" | \
-        tr '[:upper:]' '[:lower:]' | \
-        sed -E 's/[^a-z0-9]+/-/g' | \
-        sed -E 's/^-+|-+$//g')
-
-    local new_name="${clean_base}.${full_ext}"
-
-    log_debug "Filename cleaned: '$original_name' → '$new_name'"
-    echo "$new_name"
+    clean_base=$(echo "$base" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-+|-+$//g')
+    echo "${clean_base}.${full_ext}"
 }
 
-# === TRAPS ===
+# === Signal Handlers ===
 trap 'log_error "Unhandled error at line $LINENO: command \`$BASH_COMMAND\` exited with $?"; send_error_mail' ERR
 trap 'log_info "instant-remote-storage exited at $(date "+%Y-%m-%d %H:%M:%S")"' EXIT
-trap 'log_warning "Script interrupted (SIGINT or SIGTERM). Exiting..."; exit 130' INT TERM
+trap 'log_warning "Script interrupted. Exiting..."; exit 130' INT TERM
 
-# === 2 PHASE - DETECTING -> RENAMING -> UPLOADING NEW FILES IN THE FOLDER ===
+# === Main Loop: Watches for new or closed files ===
+# Uses inotifywait to monitor local directory
+# On file write or move completion, reacts to each event
 inotifywait -m \
     -e moved_to \
     -e close_write \
     --format '%f' \
     "$LOCAL_DIR" | while read -r FILENAME; do
 
-        LOCAL_FILE="$LOCAL_DIR/$FILENAME"
-        REMOTE_PATH="$REMOTE_DIR/$FILENAME"
+    LOCAL_FILE="$LOCAL_DIR/$FILENAME"
+    REMOTE_PATH="$REMOTE_DIR/$FILENAME"
 
-        # Escludi file temporanei
-        if [[ "$FILENAME" == .goutputstream* ]]; then
-            log_debug "Skipping temporary file: $FILENAME"
-            continue
-        fi
+    # Skip unwanted files: hidden dotfiles or temporary editor files
+    [[ "$FILENAME" == .goutputstream* || "$FILENAME" =~ ^\.[^./]*$ ]] && {
+        log_warning "Skipping unsupported file: '$FILENAME'"
+        continue
+    }
 
-        # Blocca file senza nome base (es. .bashrc, .txt)
-        if [[ "$FILENAME" =~ ^\.[^./]*$ ]]; then
-            log_warning "File '$FILENAME' has no basename. Skipping. Please rename it if you want it synced."
-            continue
-        fi
+    [[ ! -f "$LOCAL_FILE" ]] && {
+        log_error "File not found: '$LOCAL_FILE'"
+        continue
+    }
 
-        # Check if the file still exists (may have been deleted or moved before processing)
-        if [[ ! -f "$LOCAL_FILE" ]]; then
-            log_error "File not found: '$LOCAL_FILE'. Skipping upload."
-            # TODO: Notify via email
-            continue
-        fi
+    # Compute local file hash
+    LOCAL_HASH=$(md5sum "$LOCAL_FILE" 2>/dev/null | awk '{print $1}')
+    [[ -z "$LOCAL_HASH" ]] && {
+        log_error "Checksum failed: '$LOCAL_FILE'"
+        send_error_mail
+        continue
+    }
 
-        # Attempt to compute the local MD5 checksum
-        LOCAL_HASH=$(md5sum "$LOCAL_FILE" 2>/dev/null | awk '{print $1}')
-        if [[ -z "$LOCAL_HASH" ]]; then
-            log_error "Could not compute local checksum for '$LOCAL_FILE'"
-            send_error_mail
-            continue  # skip this file, do not block script
-        fi
+    # Retrieve remote hash if file exists remotely
+    EXISTING_HASH=$(rclone md5sum "$REMOTE_PATH" 2>/dev/null | awk '{print $1}' || true)
 
-        # Try to get remote checksum (empty if not exists)
-        if ! EXISTING_HASH=$(rclone md5sum "$REMOTE_PATH" 2>/dev/null | awk '{print $1}'); then
-            log_warning "Could not retrieve remote checksum for '$REMOTE_PATH'"
-            EXISTING_HASH=""
-        fi
+    # Try to assign new extension (based on MIME), if needed
+    NEW_FILENAME=$(assign_extension "$LOCAL_FILE")
+    ASSIGN_EXIT_CODE=$?
 
-        # Check if file has extension
-        NEW_FILENAME=$(assign_extension "$LOCAL_FILE")
-        ASSIGN_EXIT_CODE=$?
-
-        # RENAMING - Get a save filename
-        if [[ "$ASSIGN_EXIT_CODE" -eq 42 ]]; then
-            NEW_FILENAME="$FILENAME"  # fallback esplicito
-        else
-            SAVE_FILENAME=$(clean_name "$NEW_FILENAME")
-            if [[ "$SAVE_FILENAME" != "$FILENAME" ]]; then
-                if ! mv "$LOCAL_DIR/$FILENAME" "$LOCAL_DIR/$SAVE_FILENAME"; then
-                    log_error "Failed to rename '$FILENAME' → '$SAVE_FILENAME'"
-                    send_error_mail
-                    continue
-                fi
-                FILENAME="$SAVE_FILENAME"
-                LOCAL_FILE="$LOCAL_DIR/$FILENAME"
-                REMOTE_PATH="$REMOTE_DIR/$FILENAME"
-            fi
-        fi
-
-        # UPLOADING - Copy to remote
-        if [[ -z "$EXISTING_HASH" ]]; then
-            # No remote file → copy directly
-            if ! rclone copyto "$LOCAL_FILE" "$REMOTE_PATH"; then
-                log_error "Failed to upload '$LOCAL_FILE' to '$REMOTE_PATH'"
+    # Rename local file if new filename differs (extension corrected, sanitized)
+    if [[ "$ASSIGN_EXIT_CODE" -ne 42 ]]; then
+        SAVE_FILENAME=$(clean_name "$NEW_FILENAME")
+        if [[ "$SAVE_FILENAME" != "$FILENAME" ]]; then
+            if ! mv "$LOCAL_DIR/$FILENAME" "$LOCAL_DIR/$SAVE_FILENAME"; then
+                log_error "Rename failed: '$FILENAME' → '$SAVE_FILENAME'"
                 send_error_mail
                 continue
             fi
-        else
-            if [[ "$LOCAL_HASH" == "$EXISTING_HASH" ]]; then
-                # Same content → skip
-                continue
-            else
-                # Conflict: generate new name with suffix "(copia)", "(copia 2)", ...
-                IFS=":::" read -r BASE EXT <<< "$(split_base_ext "$FILENAME")"
-                COUNT=1
-                NEW_NAME="$BASE (copia).$EXT"
-
-                # Loop until name is free
-                while [[ -f "$LOCAL_DIR/$NEW_NAME" ]] || rclone lsf "$REMOTE_DIR/${NEW_NAME}" &>/dev/null; do
-                    COUNT=$((COUNT + 1))
-                    NEW_NAME="$BASE (copia $COUNT).$EXT"
-                done
-
-                if ! rclone copyto "$LOCAL_FILE" "$REMOTE_DIR/$NEW_NAME"; then
-                    log_error "Failed to upload renamed copy '$LOCAL_FILE' → '$NEW_NAME'"
-                    send_error_mail
-                    continue
-                fi
-            fi
+            FILENAME="$SAVE_FILENAME"
+            LOCAL_FILE="$LOCAL_DIR/$FILENAME"
+            REMOTE_PATH="$REMOTE_DIR/$FILENAME"
         fi
-    done
+    else
+        # Extension couldn't be assigned, still try renaming to original if changed
+        FILENAME="$NEW_FILENAME"
+        LOCAL_FILE="$LOCAL_DIR/$FILENAME"
+        REMOTE_PATH="$REMOTE_DIR/$FILENAME"
+    fi
+
+    # === Upload Decision Logic ===
+
+    if [[ -z "$EXISTING_HASH" ]]; then
+        # File doesn't exist remotely → upload it directly
+        if ! rclone copyto "$LOCAL_FILE" "$REMOTE_PATH"; then
+            log_error "Upload failed: '$LOCAL_FILE' → '$REMOTE_PATH'"
+            send_error_mail
+        fi
+
+    elif [[ "$LOCAL_HASH" != "$EXISTING_HASH" ]]; then
+        # Conflict: file with same name but different content
+        # Append (copy), (copy 2), etc. to the filename until unique
+        IFS=":::" read -r BASE EXT <<< "$(split_base_ext "$FILENAME")"
+        COUNT=1
+        NEW_NAME="$BASE (copia).$EXT"
+        while [[ -f "$LOCAL_DIR/$NEW_NAME" ]] || rclone lsf "$REMOTE_DIR/$NEW_NAME" &>/dev/null; do
+            COUNT=$((COUNT + 1))
+            NEW_NAME="$BASE (copia $COUNT).$EXT"
+        done
+        if ! rclone copyto "$LOCAL_FILE" "$REMOTE_DIR/$NEW_NAME"; then
+            log_error "Conflict upload failed: '$LOCAL_FILE' → '$NEW_NAME'"
+            send_error_mail
+        fi
+    fi
+done
+
