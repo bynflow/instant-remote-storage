@@ -24,6 +24,7 @@ log_error()   { logger -t "$LOG_TAG" "[ERROR]   $*"; }
 
 # === Send error report via email if msmtp is configured ===
 send_error_mail() {
+    # Check that ~/.msmtprc exists and is not empty
     if [[ ! -s "$HOME/.msmtprc" ]]; then
         log_warning "⚠️ Missing or empty ~/.msmtprc. Email disabled."
         return 0
@@ -152,6 +153,8 @@ declare -A MIME_EXTENSIONS=(
     ["application/x-yaml"]="yaml"
     ["application/javascript"]="js"
     ["application/x-sh"]="sh"
+    ["application/x-shellscript"]="sh"
+    ["text/x-shellscript"]="sh"
     ["application/x-python-code"]="py"
 
     # Fonts
@@ -189,6 +192,7 @@ get_mime() {
         echo ""
         return
     }
+    xdg-mime query filetype "$file_path" 2>/dev/null || \
     file --mime-type -b "$file_path"
 }
 
@@ -274,8 +278,6 @@ while IFS=":::" read -r FULLPATH EVENT; do
     FILENAME=$(basename "$FULLPATH")
     LOCAL_FILE="$FULLPATH"
     REMOTE_PATH="$REMOTE_DIR/$FILENAME"
-    # per debug
-    echo "sono qui"
 
     log_debug "📥 Event '$EVENT' received for: $FILENAME"
     # Process only CLOSE_WRITE or MOVED_TO (not both)
@@ -298,16 +300,16 @@ while IFS=":::" read -r FULLPATH EVENT; do
         continue
     }
 
-    # Compute local file hash
-    LOCAL_HASH=$(md5sum "$LOCAL_FILE" 2>/dev/null | awk '{print $1}')
-    [[ -z "$LOCAL_HASH" ]] && {
-        log_error "Checksum failed: '$LOCAL_FILE'"
-        send_error_mail
-        continue
-    }
+    # # Compute local file hash
+    # LOCAL_HASH=$(md5sum "$LOCAL_FILE" 2>/dev/null | awk '{print $1}')
+    # [[ -z "$LOCAL_HASH" ]] && {
+    #     log_error "Checksum failed: '$LOCAL_FILE'"
+    #     send_error_mail
+    #     continue
+    # }
 
-    # Retrieve remote hash if file exists remotely
-    EXISTING_HASH=$(rclone md5sum "$REMOTE_PATH" 2>/dev/null | awk '{print $1}' || true)
+    # # Retrieve remote hash if file exists remotely
+    # EXISTING_HASH=$(rclone md5sum "$REMOTE_PATH" 2>/dev/null | awk '{print $1}' || true)
 
     # Try to assign new extension (based on MIME), if needed
     if ! NEW_FILENAME=$(assign_extension "$LOCAL_FILE"); then
@@ -337,6 +339,25 @@ while IFS=":::" read -r FULLPATH EVENT; do
     fi
 
     # === Upload Decision Logic ===
+    #
+    # Qui va messo il checksum, ovvero dopo la normalizzazione del filename
+    #
+    # Compute local file hash
+    LOCAL_HASH=$(md5sum "$LOCAL_FILE" 2>/dev/null | awk '{print $1}')
+    log_debug "LOCAL_HASH: $LOCAL_HASH"
+    echo "$LOCAL_HASH"
+    [[ -z "$LOCAL_HASH" ]] && {
+        log_error "Checksum failed: '$LOCAL_FILE'"
+        send_error_mail
+        continue
+    }
+
+    # Retrieve remote hash if file exists remotely
+    EXISTING_HASH=$(rclone md5sum "$REMOTE_PATH" 2>/dev/null | awk '{print $1}' || true)
+    echo "$EXISTING_HASH"
+    log_debug "EXISTING_HASH: $EXISTING_HASH"
+    #
+    # ===
 
     if [[ -z "$EXISTING_HASH" ]]; then
         # File doesn't exist remotely → upload it directly
@@ -345,7 +366,13 @@ while IFS=":::" read -r FULLPATH EVENT; do
             send_error_mail
         fi
 
-    elif [[ "$LOCAL_HASH" != "$EXISTING_HASH" ]]; then
+    elif [[ "$LOCAL_HASH" == "$EXISTING_HASH" ]]; then        
+        # ✅ Il file esiste già ed è identico → salta
+        log_info "Identical file already exists in remote. Skipping upload: '$FILENAME'"
+        continue
+
+
+    else
         # Conflict: file with same name but different content
         # Append (copy), (copy 2), etc. to the filename until unique
         IFS=":::" read -r BASE EXT <<< "$(split_base_ext "$FILENAME")"
