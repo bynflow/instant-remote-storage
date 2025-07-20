@@ -280,11 +280,6 @@ while IFS=":::" read -r FULLPATH EVENT; do
     REMOTE_PATH="$REMOTE_DIR/$FILENAME"
 
     log_debug "📥 Event '$EVENT' received for: $FILENAME"
-    # Process only CLOSE_WRITE or MOVED_TO (not both)
-    if [[ "$EVENT" == *MOVED_TO* ]]; then
-        log_debug "🔁 Skipping redundant MOVED_TO event for already existing file: $FILENAME"
-        continue
-    fi
 
     # Skip unwanted files: hidden dotfiles or temporary editor files
     [[ "$FILENAME" == .goutputstream* || "$FILENAME" =~ ^\.[^./]*$ ]] && {
@@ -292,13 +287,19 @@ while IFS=":::" read -r FULLPATH EVENT; do
         continue
     }
 
-    # temporaneo per sviluppo
-    sleep 2
+    # # temporaneo per sviluppo
+    # sleep 2
 
+    # In molti casi MOVED_TO arriva prima che il file sia realmente visibile: aspettiamo CLOSE_WRITE
     [[ ! -f "$LOCAL_FILE" ]] && {
-        log_error "File not found: '$LOCAL_FILE'"
+        log_debug "⏳ File not yet available: '$FILENAME'. Waiting for a later event."
         continue
     }
+
+    # [[ ! -f "$LOCAL_FILE" ]] && {
+    #     log_error "File not found: '$LOCAL_FILE'"
+    #     continue
+    # }
 
     # # Compute local file hash
     # LOCAL_HASH=$(md5sum "$LOCAL_FILE" 2>/dev/null | awk '{print $1}')
@@ -340,50 +341,59 @@ while IFS=":::" read -r FULLPATH EVENT; do
 
     # === Upload Decision Logic ===
     #
-    # Qui va messo il checksum, ovvero dopo la normalizzazione del filename
+    #   DA QUI IN POI VA ELIMINATA LA LOGICA DEL CHECKSUM PER LA GESTIONE DEI CONFLITTI
+    #   E IMPLEMENTATA SOLO QUELLA DEL FILENAME
     #
-    # Compute local file hash
+    # The checksum should be placed here, i.e. after the filename has been normalized.
+    #
+    # Calculate local hash for logging/debugging only
     LOCAL_HASH=$(md5sum "$LOCAL_FILE" 2>/dev/null | awk '{print $1}')
     log_debug "LOCAL_HASH: $LOCAL_HASH"
-    echo "$LOCAL_HASH"
     [[ -z "$LOCAL_HASH" ]] && {
         log_error "Checksum failed: '$LOCAL_FILE'"
         send_error_mail
         continue
     }
 
-    # Retrieve remote hash if file exists remotely
-    EXISTING_HASH=$(rclone md5sum "$REMOTE_PATH" 2>/dev/null | awk '{print $1}' || true)
-    echo "$EXISTING_HASH"
-    log_debug "EXISTING_HASH: $EXISTING_HASH"
-    #
-    # ===
+    # # Retrieve remote hash if file exists remotely
+    # EXISTING_HASH=$(rclone md5sum "$REMOTE_PATH" 2>/dev/null | awk '{print $1}' || true)
+    # echo "$EXISTING_HASH"
+    # log_debug "EXISTING_HASH: $EXISTING_HASH"
+    # #
+    # # ===
 
-    if [[ -z "$EXISTING_HASH" ]]; then
-        # File doesn't exist remotely → upload it directly
-        if ! rclone copyto "$LOCAL_FILE" "$REMOTE_PATH"; then
-            log_error "Upload failed: '$LOCAL_FILE' → '$REMOTE_PATH'"
-            send_error_mail
-        fi
+    # ciò che va modificato per il passaggio dalla logica del checksum a quella dei filname va DA QUI
+    # if [[ -z "$EXISTING_HASH" ]]; then
+    #     # File doesn't exist remotely → upload it directly
+    #     if ! rclone copyto "$LOCAL_FILE" "$REMOTE_PATH"; then
+    #         log_error "Upload failed: '$LOCAL_FILE' → '$REMOTE_PATH'"
+    #         send_error_mail
+    #     fi
 
-    elif [[ "$LOCAL_HASH" == "$EXISTING_HASH" ]]; then        
-        # ✅ Il file esiste già ed è identico → salta
-        log_info "Identical file already exists in remote. Skipping upload: '$FILENAME'"
-        continue
+    # elif [[ "$LOCAL_HASH" == "$EXISTING_HASH" ]]; then        
+    #     # ✅ Il file esiste già ed è identico → salta
+    #     log_info "Identical file already exists in remote. Skipping upload: '$FILENAME'"
+    #     continue
+    # A QUI
 
-
-    else
-        # Conflict: file with same name but different content
-        # Append (copy), (copy 2), etc. to the filename until unique
+    # Controlla se il file esiste in remoto
+    if rclone lsf "$REMOTE_PATH" &>/dev/null; then
+        # Conflitto nome → genera filename alternativo
         IFS=":::" read -r BASE EXT <<< "$(split_base_ext "$FILENAME")"
         COUNT=1
         NEW_NAME="$BASE (copia).$EXT"
-        while [[ -f "$LOCAL_DIR/$NEW_NAME" ]] || rclone lsf "$REMOTE_DIR/$NEW_NAME" &>/dev/null; do
+        while rclone lsf "$REMOTE_DIR/$NEW_NAME" &>/dev/null || [[ -f "$LOCAL_DIR/$NEW_NAME" ]]; do
             COUNT=$((COUNT + 1))
             NEW_NAME="$BASE (copia $COUNT).$EXT"
         done
         if ! rclone copyto "$LOCAL_FILE" "$REMOTE_DIR/$NEW_NAME"; then
             log_error "Conflict upload failed: '$LOCAL_FILE' → '$NEW_NAME'"
+            send_error_mail
+        fi
+    else
+        # Nessun conflitto → upload con nome attuale
+        if ! rclone copyto "$LOCAL_FILE" "$REMOTE_PATH"; then
+            log_error "Upload failed: '$LOCAL_FILE' → '$REMOTE_PATH'"
             send_error_mail
         fi
     fi
