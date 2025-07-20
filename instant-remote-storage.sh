@@ -359,7 +359,7 @@ while IFS=":::" read -r FULLPATH EVENT; do
     # EXISTING_HASH=$(rclone md5sum "$REMOTE_PATH" 2>/dev/null | awk '{print $1}' || true)
     # echo "$EXISTING_HASH"
     # log_debug "EXISTING_HASH: $EXISTING_HASH"
-    # #
+    # # 
     # # ===
 
     # ciò che va modificato per il passaggio dalla logica del checksum a quella dei filname va DA QUI
@@ -381,10 +381,13 @@ while IFS=":::" read -r FULLPATH EVENT; do
         # Conflitto nome → genera filename alternativo
         IFS=":::" read -r BASE EXT <<< "$(split_base_ext "$FILENAME")"
         COUNT=1
-        NEW_NAME="$BASE (copia).$EXT"
+        # Clean up any remaining “:” characters
+        BASE="${BASE//:/}"
+        EXT="${EXT//:/}"
+        NEW_NAME="${BASE}-(copia).$EXT"
         while rclone lsf "$REMOTE_DIR/$NEW_NAME" &>/dev/null || [[ -f "$LOCAL_DIR/$NEW_NAME" ]]; do
             COUNT=$((COUNT + 1))
-            NEW_NAME="$BASE (copia $COUNT).$EXT"
+            NEW_NAME="${BASE}-(copia ${COUNT}).${EXT}"
         done
         if ! rclone copyto "$LOCAL_FILE" "$REMOTE_DIR/$NEW_NAME"; then
             log_error "Conflict upload failed: '$LOCAL_FILE' → '$NEW_NAME'"
