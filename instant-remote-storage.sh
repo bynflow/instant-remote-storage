@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
 # ========================================
-# instant-remote-storage - v0.1.2
+# instant-remote-storage - v0.2.0
 # Author : Carlo Capobianchi (bynflow)
 # GitHub : https://github.com/bynflow
-# Last Modified: 2025-07-17
+# Last Modified: 2025-07-20
 # ========================================
 # Watches $HOME/storage-remoto-nextcloud and syncs files to
 # hetzner-nc:indifferenziato with MIME-based renaming and
@@ -30,12 +30,13 @@ send_error_mail() {
         return 0
     fi
 
-    local subject
-    subject="❌ Error in instant-remote-storage on $(hostname) - $(date '+%Y-%m-%d %H:%M:%S')"
-    local recipient
-    recipient="amminflow@gmail.com"
-    local body_head body_tail
+    local subject recipient from_account from_address
+    subject="❌ Error in instant-remote-storage on $(hostname) - $(date '+%Y-%m-%d %H:%M:%S')" 
+    recipient="${EMAIL_TO:-default@example.com}"
+    from_account="${MSMTP_ACCOUNT:-default}"
+    from_address="${EMAIL_FROM:-instant-remote-storage <noreply@localhost>}"
 
+    local body_head body_tail
     body_head=$(cat <<-EOF
         Hello,
         An error occurred during the execution of *instant-remote-storage*.
@@ -54,16 +55,25 @@ EOF
     {
         echo "To: $recipient"
         echo "Subject: $subject"
-        echo "From: instant-remote-storage <amminflow@gmail.com>"
+        echo "From: $from_address"
         echo "Content-Type: text/plain; charset=UTF-8"
         echo
         echo "$body_head$body_tail"
-    } | msmtp --from=amminflow -t 2>/dev/null
+    } | msmtp --from="$from_account" -t 2>/dev/null
 }
 
 # === Configuration variables ===
 LOCAL_DIR="$HOME/storage-remoto-nextcloud"
 REMOTE_DIR="hetzner-nc:indifferenziato"
+
+ENV_PATH="$HOME/.env"
+if [[ -f "$ENV_PATH" ]]; then
+    # shellcheck source=/dev/null
+    source "$ENV_PATH"
+    log_info "📂 Loaded environment config from $ENV_PATH"
+else
+    log_warning "⚠️ Config file .env not found at $ENV_PATH"
+fi
 
 # Commands required by the script for execution
 REQUIRED_CMDS=(rclone inotifywait md5sum date grep find awk mapfile msmtp)
@@ -96,6 +106,10 @@ if ! rclone lsf "$REMOTE_DIR" &>/dev/null; then
     send_error_mail
     exit 1
 fi
+
+# Create a unique temporary lock directory (will be cleaned up automatically at script exit)
+LOCKDIR="$(mktemp -d /tmp/irs-locks.XXXXXX)"
+declare -A HASH_PROCESSED
 
 # === MIME to extension map (placeholder) ===
 declare -A MIME_EXTENSIONS=(
@@ -171,6 +185,116 @@ declare -A MIME_EXTENSIONS=(
 composite_exts=("tar.gz" "tar.bz2" "tar.xz" "tar.zst" "tar.lz4" "tar.br")
 
 # === Utility Functions ===
+
+handle_file() {
+    local local_file="$1"
+    local filename="$2"
+    local remote_path="$REMOTE_DIR/$filename"
+
+    # === 1. Calcolo hash e gestione lock ===
+    local local_hash
+    local_hash=$(compute_hash "$local_file")
+    [[ -z "$local_hash" ]] && {
+        log_error "❌ Hash failed: '$filename'"
+        send_error_mail
+        return 1
+    }
+
+    # Evita rielaborazione se già processato
+    if [[ -n "${HASH_PROCESSED[$local_hash]:-}" ]]; then
+        log_debug "🟡 Hash '$local_hash' already processed. Skipping '$filename'."
+        return 0
+    fi
+
+    declare -g HASHLOCK
+    HASHLOCK="$LOCKDIR/${local_hash}.lock"
+    if [[ -e "$HASHLOCK" ]]; then
+        log_warning "🚫 '$filename' already being processed (hash: $local_hash)"
+        return 0
+    fi
+    touch "$HASHLOCK"
+
+    log_debug "🔒 Lock acquired for '$filename'"
+
+    # === 2. Pre-check: stabilità, file nascosti, visibilità ===
+    if ! wait_for_stable_file "$local_file"; then
+        log_warning "⏳ '$filename' not stable"
+        return 1
+    fi
+
+    # Verifica visibilità reale file (MOVED_TO troppo anticipato)
+    [[ ! -f "$local_file" ]] && {
+        log_debug "⏳ File not yet available: '$filename'. Waiting for a later event."
+        return 0
+    }
+
+    # Skippa file temporanei o dotfile
+    [[ "$filename" =~ ^\.goutputstream || "$filename" =~ \.(swp|part|tmp|bak)$ || "$filename" =~ ^\..* ]] && {
+        log_warning "⏭️ Skipped unsupported: '$filename'"
+        return 0
+    }
+
+    # === 3. Rinominazione MIME + clean name ===
+    # MIME + estensione
+    local new_filename
+    new_filename=$(assign_extension "$local_file")
+    local assign_exit_code=$?
+
+    if [[ "$assign_exit_code" -ne 42 ]]; then
+        log_debug "Extension left unchanged for '$file_path' (original: '$original_name', MIME: '$mime')"
+        local save_filename
+        save_filename=$(clean_name "$new_filename")
+        if [[ "$save_filename" != "$filename" ]]; then
+            if ! mv "$local_file" "$LOCAL_DIR/$save_filename"; then
+                log_error "Rename failed: '$filename' → '$save_filename'"
+                send_error_mail
+                return 1
+            fi
+            filename="$save_filename"
+            log_info "🔁 Filename updated to: '$filename'"
+            local_file="$LOCAL_DIR/$filename"
+            remote_path="${remote_path:-$REMOTE_DIR/$filename}"
+        fi
+    else
+        filename="$new_filename"
+        log_info "🔁 Filename updated to: '$filename'"
+        local_file="$LOCAL_DIR/$filename"
+        remote_path="${remote_path:-$REMOTE_DIR/$filename}"
+    fi
+
+    # === 4. Upload con gestione conflitti ===
+    if rclone lsf "$remote_path" &>/dev/null; then
+        # Conflitto nome → genera filename alternativo
+        IFS=":::" read -r BASE EXT <<< "$(split_base_ext "$filename")"
+        COUNT=1
+        BASE="${BASE//:/}"
+        EXT="${EXT//:/}"
+        NEW_NAME="${BASE}-(copia).${EXT}"
+
+        while rclone lsf "$REMOTE_DIR/$NEW_NAME" &>/dev/null || [[ -f "$LOCAL_DIR/$NEW_NAME" ]]; do
+            COUNT=$((COUNT + 1))
+            NEW_NAME="${BASE}-(copia ${COUNT}).${EXT}"
+        done
+
+        local new_remote_path="$REMOTE_DIR/$NEW_NAME"
+        if ! rclone copyto "$local_file" "$new_remote_path"; then
+            log_error "⚠️ Conflict upload failed: '$filename' → '$NEW_NAME'"
+            send_error_mail
+            return 1
+        fi
+    else
+        # Nessun conflitto → upload normale
+        if ! rclone copyto "$local_file" "$remote_path"; then
+            log_error "❌ Upload failed: '$filename'"
+            send_error_mail
+            return 1
+        fi
+        log_info "🔚 Done processing: '$filename'"
+    fi
+    rm -f "$HASHLOCK"
+    HASH_PROCESSED[$local_hash]=1
+    log_info "📦 File '$filename' marked as processed (hash: $local_hash)"
+}
 
 # Splits a filename into base and extension, preserving known composite extensions
 split_base_ext() {
@@ -266,141 +390,63 @@ clean_name() {
     echo "${clean_base}.${full_ext}"
 }
 
+# Questa funzione controlla che un file sia "stabile", cioè che la sua dimensione
+# non cambi più dopo un certo numero di tentativi (default: 10), con un intervallo
+# di 0.5 secondi tra ogni controllo.
+# Utile per evitare di agire su file ancora in scrittura (es. durante copie di file grandi).
+wait_for_stable_file() {
+    local file="$1"                    # File da controllare
+    local retries=1000                 # Numero massimo di tentativi
+    local interval=0.5                 # Secondi di attesa tra ogni tentativo
+    local last_size=-1                 # Dimensione del file al tentativo precedente (inizialmente -1)
+    local size
+
+    for ((i=0; i<retries; i++)); do
+        # Ottiene la dimensione attuale del file in byte
+        # -c %s stampa solo la dimensione (senza nome file o permessi ecc.)
+        # Se stat fallisce, restituisce -1
+        size=$(stat -c %s "$file" 2>/dev/null || echo -1)
+
+        # Se la dimensione attuale è identica alla precedente e maggiore di 0,
+        # consideriamo il file "stabile" e usciamo con successo (return 0)
+        if [[ "$size" -eq "$last_size" && "$size" -gt 0 ]]; then
+            return 0
+        fi
+
+        # Aggiorna la dimensione per il prossimo giro e attende
+        last_size=$size
+        sleep "$interval"
+    done
+
+    # Se il ciclo termina senza trovare una dimensione stabile, logga errore e ritorna fallimento
+    log_error "File not stable after retries: '$file'"
+    return 1
+}
+
+compute_hash() {
+    [[ -f "$1" ]] || return 1
+    sha256sum "$1" 2>/dev/null | awk '{print $1}'
+}
+
+main_loop() {
+    log_info "🚀 Starting instant-remote-storage watcher on $(hostname) at $(date)"
+
+    inotifywait -m -e close_write -e moved_to --format '%w%f:::%e' "$LOCAL_DIR" |
+    while IFS=":::" read -r FULLPATH EVENT; do
+        FILENAME=$(basename "$FULLPATH")
+        log_debug "📥 Event '$EVENT' received for: $FILENAME"
+
+        handle_file "$FULLPATH" "$FILENAME"
+    done
+    log_info "🔁 Watch loop terminated unexpectedly"
+}
+
 # === Signal Handlers ===
 trap 'log_error "Unhandled error at line $LINENO: command \`$BASH_COMMAND\` exited with $?"; send_error_mail' ERR
 trap 'log_info "instant-remote-storage exited at $(date "+%Y-%m-%d %H:%M:%S")"' EXIT
+# Clean up entire lockdir when script exits (even with Ctrl+C)
+trap 'rm -rf "$LOCKDIR"' EXIT
 trap 'log_warning "Script interrupted. Exiting..."; exit 130' INT TERM
 
-# === Main Loop: Watches for new or closed files ===
-# Uses inotifywait to monitor local directory
-# On file write or move completion, reacts to each event
-while IFS=":::" read -r FULLPATH EVENT; do
-    FILENAME=$(basename "$FULLPATH")
-    LOCAL_FILE="$FULLPATH"
-    REMOTE_PATH="$REMOTE_DIR/$FILENAME"
-
-    log_debug "📥 Event '$EVENT' received for: $FILENAME"
-
-    # Skip unwanted files: hidden dotfiles or temporary editor files
-    [[ "$FILENAME" == .goutputstream* || "$FILENAME" =~ ^\.[^./]*$ ]] && {
-        log_warning "Skipping unsupported file: '$FILENAME'"
-        continue
-    }
-
-    # # temporaneo per sviluppo
-    # sleep 2
-
-    # In molti casi MOVED_TO arriva prima che il file sia realmente visibile: aspettiamo CLOSE_WRITE
-    [[ ! -f "$LOCAL_FILE" ]] && {
-        log_debug "⏳ File not yet available: '$FILENAME'. Waiting for a later event."
-        continue
-    }
-
-    # [[ ! -f "$LOCAL_FILE" ]] && {
-    #     log_error "File not found: '$LOCAL_FILE'"
-    #     continue
-    # }
-
-    # # Compute local file hash
-    # LOCAL_HASH=$(md5sum "$LOCAL_FILE" 2>/dev/null | awk '{print $1}')
-    # [[ -z "$LOCAL_HASH" ]] && {
-    #     log_error "Checksum failed: '$LOCAL_FILE'"
-    #     send_error_mail
-    #     continue
-    # }
-
-    # # Retrieve remote hash if file exists remotely
-    # EXISTING_HASH=$(rclone md5sum "$REMOTE_PATH" 2>/dev/null | awk '{print $1}' || true)
-
-    # Try to assign new extension (based on MIME), if needed
-    if ! NEW_FILENAME=$(assign_extension "$LOCAL_FILE"); then
-        ASSIGN_EXIT_CODE=$?
-    else
-        ASSIGN_EXIT_CODE=0
-    fi
-
-    # Rename local file if new filename differs (extension corrected, sanitized)
-    if [[ "$ASSIGN_EXIT_CODE" -ne 42 ]]; then
-        SAVE_FILENAME=$(clean_name "$NEW_FILENAME")
-        if [[ "$SAVE_FILENAME" != "$FILENAME" ]]; then
-            if ! mv "$LOCAL_DIR/$FILENAME" "$LOCAL_DIR/$SAVE_FILENAME"; then
-                log_error "Rename failed: '$FILENAME' → '$SAVE_FILENAME'"
-                send_error_mail
-                continue
-            fi
-            FILENAME="$SAVE_FILENAME"
-            LOCAL_FILE="$LOCAL_DIR/$FILENAME"
-            REMOTE_PATH="$REMOTE_DIR/$FILENAME"
-        fi
-    else
-        # Extension couldn't be assigned, still try renaming to original if changed
-        FILENAME="$NEW_FILENAME"
-        LOCAL_FILE="$LOCAL_DIR/$FILENAME"
-        REMOTE_PATH="$REMOTE_DIR/$FILENAME"
-    fi
-
-    # === Upload Decision Logic ===
-    #
-    #   DA QUI IN POI VA ELIMINATA LA LOGICA DEL CHECKSUM PER LA GESTIONE DEI CONFLITTI
-    #   E IMPLEMENTATA SOLO QUELLA DEL FILENAME
-    #
-    # The checksum should be placed here, i.e. after the filename has been normalized.
-    #
-    # Calculate local hash for logging/debugging only
-    LOCAL_HASH=$(md5sum "$LOCAL_FILE" 2>/dev/null | awk '{print $1}')
-    log_debug "LOCAL_HASH: $LOCAL_HASH"
-    [[ -z "$LOCAL_HASH" ]] && {
-        log_error "Checksum failed: '$LOCAL_FILE'"
-        send_error_mail
-        continue
-    }
-
-    # # Retrieve remote hash if file exists remotely
-    # EXISTING_HASH=$(rclone md5sum "$REMOTE_PATH" 2>/dev/null | awk '{print $1}' || true)
-    # echo "$EXISTING_HASH"
-    # log_debug "EXISTING_HASH: $EXISTING_HASH"
-    # # 
-    # # ===
-
-    # ciò che va modificato per il passaggio dalla logica del checksum a quella dei filname va DA QUI
-    # if [[ -z "$EXISTING_HASH" ]]; then
-    #     # File doesn't exist remotely → upload it directly
-    #     if ! rclone copyto "$LOCAL_FILE" "$REMOTE_PATH"; then
-    #         log_error "Upload failed: '$LOCAL_FILE' → '$REMOTE_PATH'"
-    #         send_error_mail
-    #     fi
-
-    # elif [[ "$LOCAL_HASH" == "$EXISTING_HASH" ]]; then        
-    #     # ✅ Il file esiste già ed è identico → salta
-    #     log_info "Identical file already exists in remote. Skipping upload: '$FILENAME'"
-    #     continue
-    # A QUI
-
-    # Controlla se il file esiste in remoto
-    if rclone lsf "$REMOTE_PATH" &>/dev/null; then
-        # Conflitto nome → genera filename alternativo
-        IFS=":::" read -r BASE EXT <<< "$(split_base_ext "$FILENAME")"
-        COUNT=1
-        # Clean up any remaining “:” characters
-        BASE="${BASE//:/}"
-        EXT="${EXT//:/}"
-        NEW_NAME="${BASE}-(copia).$EXT"
-        while rclone lsf "$REMOTE_DIR/$NEW_NAME" &>/dev/null || [[ -f "$LOCAL_DIR/$NEW_NAME" ]]; do
-            COUNT=$((COUNT + 1))
-            NEW_NAME="${BASE}-(copia ${COUNT}).${EXT}"
-        done
-        if ! rclone copyto "$LOCAL_FILE" "$REMOTE_DIR/$NEW_NAME"; then
-            log_error "Conflict upload failed: '$LOCAL_FILE' → '$NEW_NAME'"
-            send_error_mail
-        fi
-    else
-        # Nessun conflitto → upload con nome attuale
-        if ! rclone copyto "$LOCAL_FILE" "$REMOTE_PATH"; then
-            log_error "Upload failed: '$LOCAL_FILE' → '$REMOTE_PATH'"
-            send_error_mail
-        fi
-    fi
-done < <(
-    inotifywait -m -e close_write -e moved_to --format '%w%f:::%e' "$LOCAL_DIR"
-)
+main_loop
 
