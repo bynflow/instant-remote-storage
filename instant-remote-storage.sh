@@ -22,6 +22,15 @@ log_debug()   { [[ "$DEBUG" == "1" ]] && logger -t "$LOG_TAG" "[DEBUG]   $*"; }
 log_warning() { logger -t "$LOG_TAG" "[WARNING] $*"; }
 log_error()   { logger -t "$LOG_TAG" "[ERROR]   $*"; }
 
+ENV_PATH="$HOME/.env"
+if [[ -f "$ENV_PATH" ]]; then
+    # shellcheck source=/dev/null
+    source "$ENV_PATH"
+    log_info "📂 Loaded environment config from $ENV_PATH"
+else
+    log_warning "⚠️ Config file .env not found at $ENV_PATH"
+fi
+
 # === Send error report via email if msmtp is configured ===
 send_error_mail() {
     # Check that ~/.msmtprc exists and is not empty
@@ -66,15 +75,6 @@ EOF
 LOCAL_DIR="$HOME/storage-remoto-nextcloud"
 REMOTE_DIR="hetzner-nc:indifferenziato"
 
-ENV_PATH="$HOME/.env"
-if [[ -f "$ENV_PATH" ]]; then
-    # shellcheck source=/dev/null
-    source "$ENV_PATH"
-    log_info "📂 Loaded environment config from $ENV_PATH"
-else
-    log_warning "⚠️ Config file .env not found at $ENV_PATH"
-fi
-
 # Commands required by the script for execution
 REQUIRED_CMDS=(rclone inotifywait md5sum date grep find awk mapfile msmtp)
 
@@ -109,7 +109,10 @@ fi
 
 # Create a unique temporary lock directory (will be cleaned up automatically at script exit)
 LOCKDIR="$(mktemp -d /tmp/irs-locks.XXXXXX)"
-declare -A HASH_PROCESSED
+# Mappe per evitare duplicati già elaborati
+declare -A HASH_SEEN=()
+declare -A FILE_SEEN=()
+declare -A HASH_PROCESSED=()
 
 # === MIME to extension map (placeholder) ===
 declare -A MIME_EXTENSIONS=(
@@ -119,6 +122,7 @@ declare -A MIME_EXTENSIONS=(
     ["text/css"]="css"
     ["text/csv"]="csv"
     ["text/markdown"]="md"
+    # ["application/x-bittorrent"]="torrent"
 
     # Images
     ["image/jpeg"]="jpg"
@@ -186,114 +190,9 @@ composite_exts=("tar.gz" "tar.bz2" "tar.xz" "tar.zst" "tar.lz4" "tar.br")
 
 # === Utility Functions ===
 
-handle_file() {
-    local local_file="$1"
-    local filename="$2"
-    local remote_path="$REMOTE_DIR/$filename"
-
-    # === 1. Calcolo hash e gestione lock ===
-    local local_hash
-    local_hash=$(compute_hash "$local_file")
-    [[ -z "$local_hash" ]] && {
-        log_error "❌ Hash failed: '$filename'"
-        send_error_mail
-        return 1
-    }
-
-    # Evita rielaborazione se già processato
-    if [[ -n "${HASH_PROCESSED[$local_hash]:-}" ]]; then
-        log_debug "🟡 Hash '$local_hash' already processed. Skipping '$filename'."
-        return 0
-    fi
-
-    declare -g HASHLOCK
-    HASHLOCK="$LOCKDIR/${local_hash}.lock"
-    if [[ -e "$HASHLOCK" ]]; then
-        log_warning "🚫 '$filename' already being processed (hash: $local_hash)"
-        return 0
-    fi
-    touch "$HASHLOCK"
-
-    log_debug "🔒 Lock acquired for '$filename'"
-
-    # === 2. Pre-check: stabilità, file nascosti, visibilità ===
-    if ! wait_for_stable_file "$local_file"; then
-        log_warning "⏳ '$filename' not stable"
-        return 1
-    fi
-
-    # Verifica visibilità reale file (MOVED_TO troppo anticipato)
-    [[ ! -f "$local_file" ]] && {
-        log_debug "⏳ File not yet available: '$filename'. Waiting for a later event."
-        return 0
-    }
-
-    # Skippa file temporanei o dotfile
-    [[ "$filename" =~ ^\.goutputstream || "$filename" =~ \.(swp|part|tmp|bak)$ || "$filename" =~ ^\..* ]] && {
-        log_warning "⏭️ Skipped unsupported: '$filename'"
-        return 0
-    }
-
-    # === 3. Rinominazione MIME + clean name ===
-    # MIME + estensione
-    local new_filename
-    new_filename=$(assign_extension "$local_file")
-    local assign_exit_code=$?
-
-    if [[ "$assign_exit_code" -ne 42 ]]; then
-        log_debug "Extension left unchanged for '$file_path' (original: '$original_name', MIME: '$mime')"
-        local save_filename
-        save_filename=$(clean_name "$new_filename")
-        if [[ "$save_filename" != "$filename" ]]; then
-            if ! mv "$local_file" "$LOCAL_DIR/$save_filename"; then
-                log_error "Rename failed: '$filename' → '$save_filename'"
-                send_error_mail
-                return 1
-            fi
-            filename="$save_filename"
-            log_info "🔁 Filename updated to: '$filename'"
-            local_file="$LOCAL_DIR/$filename"
-            remote_path="${remote_path:-$REMOTE_DIR/$filename}"
-        fi
-    else
-        filename="$new_filename"
-        log_info "🔁 Filename updated to: '$filename'"
-        local_file="$LOCAL_DIR/$filename"
-        remote_path="${remote_path:-$REMOTE_DIR/$filename}"
-    fi
-
-    # === 4. Upload con gestione conflitti ===
-    if rclone lsf "$remote_path" &>/dev/null; then
-        # Conflitto nome → genera filename alternativo
-        IFS=":::" read -r BASE EXT <<< "$(split_base_ext "$filename")"
-        COUNT=1
-        BASE="${BASE//:/}"
-        EXT="${EXT//:/}"
-        NEW_NAME="${BASE}-(copia).${EXT}"
-
-        while rclone lsf "$REMOTE_DIR/$NEW_NAME" &>/dev/null || [[ -f "$LOCAL_DIR/$NEW_NAME" ]]; do
-            COUNT=$((COUNT + 1))
-            NEW_NAME="${BASE}-(copia ${COUNT}).${EXT}"
-        done
-
-        local new_remote_path="$REMOTE_DIR/$NEW_NAME"
-        if ! rclone copyto "$local_file" "$new_remote_path"; then
-            log_error "⚠️ Conflict upload failed: '$filename' → '$NEW_NAME'"
-            send_error_mail
-            return 1
-        fi
-    else
-        # Nessun conflitto → upload normale
-        if ! rclone copyto "$local_file" "$remote_path"; then
-            log_error "❌ Upload failed: '$filename'"
-            send_error_mail
-            return 1
-        fi
-        log_info "🔚 Done processing: '$filename'"
-    fi
-    rm -f "$HASHLOCK"
-    HASH_PROCESSED[$local_hash]=1
-    log_info "📦 File '$filename' marked as processed (hash: $local_hash)"
+# Rilascio lock in ogni exit anticipato dentro la funzione handle_file
+cleanup_lock() {
+    [[ -n "$HASHLOCK" && -e "$HASHLOCK" ]] && rm -f "$HASHLOCK" && log_debug "🔓 Lock released ($HASHLOCK)"
 }
 
 # Splits a filename into base and extension, preserving known composite extensions
@@ -308,7 +207,7 @@ split_base_ext() {
     echo "${filename%.*}:::${filename##*.}"
 }
 
-# Determines MIME type using `file` command; skips empty files
+# Determines MIME type using `xdg-mime` or `file` command; skips empty files
 get_mime() {
     local file_path="$1"
     [[ ! -s "$file_path" ]] && {
@@ -322,38 +221,84 @@ get_mime() {
 
 # Determines the correct extension based on MIME type
 # Returns new filename if extension is added or corrected
+# assign_extension() {
+#     local file_path
+#     file_path="$1"
+#     local original_name
+#     original_name=$(basename "$file_path")
+#     local mime
+#     local ext
+
+#     printf "Debug interno 0 -> assign_extension()::\t %s file_path- $file_path\t\n" >&2
+#     printf "Debug interno 1 -> assign_extension()::\t %s original_name- $original_name\t\n" >&2
+
+#     # Skip extension reassignment for composite types
+#     for ext in "${composite_exts[@]}"; do
+#         [[ "$original_name" == *".${ext}" ]] && {
+#             log_debug "Composite extension '$ext' detected. Keeping original name."
+#             printf "%s $original_name"
+#             return 0
+#         }
+#     done
+
+#     mime=$(get_mime "$file_path")
+#     printf "Debug interno 2 -> assign_extension()::\t %s mime- $mime\t\n" >&2
+#     [[ -z "$mime" ]] && {
+#         log_warning "MIME detection failed. Skipping extension assignment."
+#         printf "%s $original_name"
+#         return 42
+#     }
+
+#     ext="${MIME_EXTENSIONS[$mime]:-}"
+#     printf "Debug interno 2,2 -> assign_extension()::\t %s ext- $ext\t\n" >&2
+#     [[ -z "$ext" ]] && {
+#         log_warning "MIME '$mime' not mapped. Skipping extension assignment."
+#         printf "%s $original_name"
+#         return 42
+#     }
+
+#     # If file already has correct extension, return it; else, append correct extension
+#     [[ "$original_name" == *".${ext}" ]] && printf "%s $original_name" || printf "%s ${original_name}.${ext}"
+# }
+
 assign_extension() {
-    local file_path
-    file_path="$1"
+    local file_path="$1"
     local original_name
     original_name=$(basename "$file_path")
 
-    # Skip extension reassignment for composite types
+    # Skip composite types
     for ext in "${composite_exts[@]}"; do
         [[ "$original_name" == *".${ext}" ]] && {
             log_debug "Composite extension '$ext' detected. Keeping original name."
-            echo "$original_name"
+            printf "%s\n" "$original_name"
             return 0
         }
     done
 
-    local mime ext
+    local mime
     mime=$(get_mime "$file_path")
-    [[ -z "$mime" ]] && {
+    if [[ -z "$mime" ]]; then
         log_warning "MIME detection failed. Skipping extension assignment."
-        echo "$original_name"
+        printf "%s\n" "$original_name"
         return 42
-    }
+    fi
 
-    ext="${MIME_EXTENSIONS[$mime]:-}"
-    [[ -z "$ext" ]] && {
+    local ext="${MIME_EXTENSIONS[$mime]:-}"
+    # printf "Debug interno 2,2 -> assign_extension()::\t %s ext- $ext\t\n" >&2
+    if [[ -z "$ext" ]]; then
         log_warning "MIME '$mime' not mapped. Skipping extension assignment."
-        echo "$original_name"
+        printf "%s\n" "$original_name"
+        # printf "Debug interno 2,2 -> assign_extension(condizione 'ext')::\t %s original_name- $original_name\t\n" >&2
         return 42
-    }
+    fi
 
-    # If file already has correct extension, return it; else, append correct extension
-    [[ "$original_name" == *".${ext}" ]] && echo "$original_name" || echo "${original_name}.${ext}"
+    if [[ "$original_name" == *".${ext}" ]]; then
+        printf "%s\n" "$original_name"
+    else
+        printf "%s\n" "${original_name}.${ext}"
+    fi
+
+    return 0
 }
 
 # Sanitizes a filename:
@@ -370,6 +315,8 @@ clean_name() {
     found=0
     local base full_ext
 
+    # printf "Debug interno 3 -> clean_name()::\t %s original_name- $original_name\t\n" >&2
+
     # Handle composite extensions
     for ext in "${composite_exts[@]}"; do
         if [[ "$original_name" == *".${ext}" ]]; then
@@ -385,8 +332,18 @@ clean_name() {
         base="${original_name%.*}"
     fi
 
+    # printf "Debug interno 4 ->  clean_name()::\t %s base- $base\t\n" >&2
+    # printf "Debug interno 5 ->  clean_name()::\t %s full_ext- $full_ext\t\n" >&2
+
+    if [[ -z "$base" ]]; then
+        base="unnamed"
+    fi
+
     local clean_base
-    clean_base=$(echo "$base" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-+|-+$//g')
+    clean_base=$(echo "$base" |\
+    tr '[:upper:]' '[:lower:]' |\
+    sed -E 's/[^a-z0-9]+/-/g' |\
+    sed -E 's/^-+|-+$//g')
     echo "${clean_base}.${full_ext}"
 }
 
@@ -426,6 +383,167 @@ wait_for_stable_file() {
 compute_hash() {
     [[ -f "$1" ]] || return 1
     sha256sum "$1" 2>/dev/null | awk '{print $1}'
+}
+
+handle_file() {
+    local local_file="$1"
+    local filename="$2"
+    local remote_path="$REMOTE_DIR/$filename"
+
+    # === 1. Calcolo hash e gestione lock ===
+    local local_hash
+    local_hash=$(compute_hash "$local_file")
+    [[ -z "$local_hash" ]] && {
+        log_error "❌ Hash failed: '$filename'"
+        send_error_mail
+        EXIT_REASON="ERR"
+        return 1
+    }
+
+    # Evita rielaborazione se già processato
+    if [[ -n "${HASH_PROCESSED[$local_hash]:-}" ]]; then
+        log_debug "🟡 Hash '$local_hash' already processed. Skipping '$filename'."
+        EXIT_REASON="SKIP"
+        return 0
+    fi
+
+    # Evita processamenti duplicati solo se hash + filename sono entrambi già visti
+    if [[ -n "${HASH_SEEN[$local_hash]:-}" && -n "${FILE_SEEN[$filename]:-}" ]]; then
+        log_debug "🟡 Already processed: '$filename' (hash: $local_hash). Skipping."
+        EXIT_REASON="SKIP"
+        return 0
+    fi
+
+    # Prosegui: registra questo file come visto
+    HASH_SEEN["$local_hash"]=1
+    FILE_SEEN["$filename"]=1
+
+    # Procedura di lock (per evitare doppio trigger da inotify)
+    local HASHLOCK="$LOCKDIR/${local_hash}.lock"
+    HASHLOCK="$LOCKDIR/${local_hash}.lock"
+    if [[ -e "$HASHLOCK" ]]; then
+        log_debug "⏳ Hash '$local_hash' is currently locked. Skipping duplicate trigger."
+        EXIT_REASON="LOCK"
+        return 0
+    fi
+    touch "$HASHLOCK"
+
+    log_debug "🔒 Lock acquired for '$filename'"
+
+    local EXIT_REASON="OK"
+    trap '[ "$EXIT_REASON" != "OK" ] && log_warning "⛔ handle_file crashed or exited early — cleaning up lock."; cleanup_lock' RETURN
+
+    # === 2. Pre-check: stabilità, file nascosti, visibilità ===
+    if ! wait_for_stable_file "$local_file"; then
+        log_warning "⏳ '$filename' not stable"
+        cleanup_lock
+        EXIT_REASON="ERR"
+        return 1
+    fi
+
+    # Verifica visibilità reale file (MOVED_TO troppo anticipato)
+    [[ ! -f "$local_file" ]] && {
+        log_debug "⏳ File not yet available: '$filename'. Waiting for a later event."
+        cleanup_lock
+        EXIT_REASON="SKIP"
+        return 0
+    }
+
+    # Skippa file temporanei o dotfile
+    [[ "$filename" =~ ^\.goutputstream || "$filename" =~ \.(swp|part|tmp|bak)$ || "$filename" =~ ^\..* ]] && {
+        log_warning "⏭️ Skipped unsupported: '$filename'"
+        cleanup_lock
+        EXIT_REASON="SKIP"
+        return 0
+    }
+
+    # === 3. Rinominazione MIME + clean name ===
+    local new_filename
+    local assign_exit_code
+
+    # Cattura stdout + exit code
+    new_filename=$(assign_extension "$local_file" | xargs)
+    assign_exit_code=$?
+    # printf "Debug interno 6 -> handle_file()::\t %s assign_exit_code- $assign_exit_code\t\n"
+
+    log_debug "🔎 assign_exit_code = $assign_exit_code"
+    log_debug "📝 new_filename = '$new_filename'"
+
+    if [[ -z "$new_filename" ]]; then
+        log_error "new_filename is unexpectedly empty after assign_extension"
+        cleanup_lock
+        EXIT_REASON="ERR"
+        return 1
+    fi
+
+    if [[ "$assign_exit_code" -eq 42 ]]; then
+        EXIT_REASON="SKIP"
+        log_info "⚠️ MIME unassigned: skipping '$filename' (exit 42 from assign_extension)"
+        cleanup_lock
+        return 0
+    fi
+
+    # Clean name
+    local save_filename
+    save_filename=$(clean_name "$new_filename")
+
+    # Se è cambiato qualcosa → rinomina file
+    if [[ "$save_filename" != "$filename" ]]; then
+        log_debug "🔁 Clean name differente: '$filename' → '$save_filename'"
+        if ! mv "$local_file" "$LOCAL_DIR/$save_filename"; then
+            log_error "Rename failed: '$filename' → '$save_filename'"
+            send_error_mail
+            cleanup_lock
+            EXIT_REASON="ERR"
+            return 1
+        fi
+
+        # Aggiorna variabili coerenti
+        filename="$save_filename"
+        local_file="$LOCAL_DIR/$filename"
+        remote_path="$REMOTE_DIR/$filename"
+
+        log_info "📦 File renamed to: '$filename'"
+    fi
+
+    # === 4. Upload con gestione conflitti ===
+    if rclone lsf "$remote_path" &>/dev/null; then
+        # Conflitto nome → genera filename alternativo
+        IFS=":::" read -r BASE EXT <<< "$(split_base_ext "$filename")"
+        COUNT=1
+        BASE="${BASE//:/}"
+        EXT="${EXT//:/}"
+        NEW_NAME="${BASE}-(copia).${EXT}"
+
+        while rclone lsf "$REMOTE_DIR/$NEW_NAME" &>/dev/null || [[ -f "$LOCAL_DIR/$NEW_NAME" ]]; do
+            COUNT=$((COUNT + 1))
+            NEW_NAME="${BASE}-(copia ${COUNT}).${EXT}"
+        done
+
+        local new_remote_path="$REMOTE_DIR/$NEW_NAME"
+        if ! rclone copyto "$local_file" "$new_remote_path"; then
+            log_error "⚠️ Conflict upload failed: '$filename' → '$NEW_NAME'"
+            send_error_mail
+            EXIT_REASON="ERR"
+            return 1
+        fi
+    else
+        # Nessun conflitto → upload normale
+        if ! rclone copyto "$local_file" "$remote_path"; then
+            log_error "❌ Upload failed: '$filename'"
+            send_error_mail
+            cleanup_lock
+            EXIT_REASON="ERR"
+            return 1
+        fi
+        log_info "✅ Upload completed: '$filename'"
+    fi
+    cleanup_lock
+    HASH_PROCESSED[$local_hash]=1
+    log_info "📦 File '$filename' marked as processed (hash: $local_hash)"
+
+    EXIT_REASON="OK"
+    return 0
 }
 
 main_loop() {
