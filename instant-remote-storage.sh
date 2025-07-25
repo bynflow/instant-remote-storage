@@ -125,7 +125,7 @@ declare -A MIME_EXTENSIONS=(
     # ["application/x-bittorrent"]="torrent"
 
     # Images
-    ["image/jpeg"]="jpg"
+    # ["image/jpeg"]="jpg"
     ["image/png"]="png"
     ["image/gif"]="gif"
     ["image/webp"]="webp"
@@ -192,7 +192,15 @@ composite_exts=("tar.gz" "tar.bz2" "tar.xz" "tar.zst" "tar.lz4" "tar.br")
 
 # Rilascio lock in ogni exit anticipato dentro la funzione handle_file
 cleanup_lock() {
-    [[ -n "$HASHLOCK" && -e "$HASHLOCK" ]] && rm -f "$HASHLOCK" && log_debug "🔓 Lock released ($HASHLOCK)"
+    if [[ -z "${HASHLOCK:-}" ]]; then
+        log_debug "🧼 cleanup_lock: HASHLOCK non inizializzato, nulla da rimuovere."
+        return
+    fi
+
+    if [[ -e "$HASHLOCK" ]]; then
+        rm -f "$HASHLOCK"
+        log_debug "🔓 Lock released ($HASHLOCK)"
+    fi
 }
 
 # Splits a filename into base and extension, preserving known composite extensions
@@ -221,46 +229,6 @@ get_mime() {
 
 # Determines the correct extension based on MIME type
 # Returns new filename if extension is added or corrected
-# assign_extension() {
-#     local file_path
-#     file_path="$1"
-#     local original_name
-#     original_name=$(basename "$file_path")
-#     local mime
-#     local ext
-
-#     printf "Debug interno 0 -> assign_extension()::\t %s file_path- $file_path\t\n" >&2
-#     printf "Debug interno 1 -> assign_extension()::\t %s original_name- $original_name\t\n" >&2
-
-#     # Skip extension reassignment for composite types
-#     for ext in "${composite_exts[@]}"; do
-#         [[ "$original_name" == *".${ext}" ]] && {
-#             log_debug "Composite extension '$ext' detected. Keeping original name."
-#             printf "%s $original_name"
-#             return 0
-#         }
-#     done
-
-#     mime=$(get_mime "$file_path")
-#     printf "Debug interno 2 -> assign_extension()::\t %s mime- $mime\t\n" >&2
-#     [[ -z "$mime" ]] && {
-#         log_warning "MIME detection failed. Skipping extension assignment."
-#         printf "%s $original_name"
-#         return 42
-#     }
-
-#     ext="${MIME_EXTENSIONS[$mime]:-}"
-#     printf "Debug interno 2,2 -> assign_extension()::\t %s ext- $ext\t\n" >&2
-#     [[ -z "$ext" ]] && {
-#         log_warning "MIME '$mime' not mapped. Skipping extension assignment."
-#         printf "%s $original_name"
-#         return 42
-#     }
-
-#     # If file already has correct extension, return it; else, append correct extension
-#     [[ "$original_name" == *".${ext}" ]] && printf "%s $original_name" || printf "%s ${original_name}.${ext}"
-# }
-
 assign_extension() {
     local file_path="$1"
     local original_name
@@ -298,6 +266,7 @@ assign_extension() {
         printf "%s\n" "${original_name}.${ext}"
     fi
 
+    log_debug "✅ assign_extension: '$original_name' estensione confermata o corretta → '$ext'"
     return 0
 }
 
@@ -381,7 +350,11 @@ wait_for_stable_file() {
 }
 
 compute_hash() {
-    [[ -f "$1" ]] || return 1
+    if [[ ! -f "$1" ]]; then
+        log_warning "compute_hash(): file non trovato o non valido: '$1'"
+        return 1
+    fi
+
     sha256sum "$1" 2>/dev/null | awk '{print $1}'
 }
 
@@ -389,6 +362,8 @@ handle_file() {
     local local_file="$1"
     local filename="$2"
     local remote_path="$REMOTE_DIR/$filename"
+
+    log_debug "➡️ handle_file: inizio per '$filename'"
 
     # === 1. Calcolo hash e gestione lock ===
     local local_hash
@@ -543,6 +518,7 @@ handle_file() {
     log_info "📦 File '$filename' marked as processed (hash: $local_hash)"
 
     EXIT_REASON="OK"
+    log_debug "⬅️ handle_file: fine per '$filename'"
     return 0
 }
 
