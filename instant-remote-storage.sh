@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
 # ========================================
-# instant-remote-storage - v0.2.0
+# instant-remote-storage - v0.3.0
 # Author : Carlo Capobianchi (bynflow)
 # GitHub : https://github.com/bynflow
-# Last Modified: 2025-07-20
+# Last Modified: 2025-07-25
 # ========================================
 # Watches $HOME/storage-remoto-nextcloud and syncs files to
 # hetzner-nc:indifferenziato with MIME-based renaming and
@@ -126,10 +126,10 @@ declare -A MIME_EXTENSIONS=(
     ["text/css"]="css"
     ["text/csv"]="csv"
     ["text/markdown"]="md"
-    # ["application/x-bittorrent"]="torrent"
+    ["application/x-bittorrent"]="torrent"
 
     # Images
-    # ["image/jpeg"]="jpg"
+    ["image/jpeg"]="jpg"
     ["image/png"]="png"
     ["image/gif"]="gif"
     ["image/webp"]="webp"
@@ -257,15 +257,6 @@ assign_extension() {
         return 42
     fi
 
-    # local ext="${MIME_EXTENSIONS[$mime]:-}"
-    # printf "Debug interno 2,2 -> assign_extension()::\t %s ext- $ext\t\n" >&2
-    # if [[ -z "$ext" ]]; then
-    #     log_warning "MIME '$mime' not mapped. Skipping extension assignment."
-    #     printf "%s\n" "$original_name"
-    #     # printf "Debug interno 2,2 -> assign_extension(condizione 'ext')::\t %s original_name- $original_name\t\n" >&2
-    #     return 42
-    # fi
-
     local ext="${MIME_EXTENSIONS[$mime]:-}"
     
     # printf "Debug interno 2,2 -> assign_extension()::\t %s ext- $ext\t\n" >&2
@@ -300,8 +291,6 @@ clean_name() {
     found=0
     local base full_ext
 
-    # printf "Debug interno 3 -> clean_name()::\t %s original_name- $original_name\t\n" >&2
-
     # Handle composite extensions
     for ext in "${composite_exts[@]}"; do
         if [[ "$original_name" == *".${ext}" ]]; then
@@ -316,9 +305,6 @@ clean_name() {
         full_ext="${original_name##*.}"
         base="${original_name%.*}"
     fi
-
-    # printf "Debug interno 4 ->  clean_name()::\t %s base- $base\t\n" >&2
-    # printf "Debug interno 5 ->  clean_name()::\t %s full_ext- $full_ext\t\n" >&2
 
     if [[ -z "$base" ]]; then
         base="unnamed"
@@ -450,87 +436,72 @@ handle_file() {
         return 0
     }
 
-    # === 3. Rinomina MIME + clean name ===
+    # # # === Inizio della logica principale ===
+    # new_filename ha 3 possibilità: 1. è come $filename non modificato,
+    # 2. è filename più l'aggiunta di una estensione, 3. è lasciato com'era perché
+    # non è stato riconosciuto né il MIME nè quindi l'estensione
     local new_filename
     local assign_exit_code
 
-    # # Aggiunta VAR di prova
     local assign_output
-    # assign_output="$(assign_extension "$local_file")"
+    local save_filename
+    local new_remote_path
 
-    # # Blocco di prova
+    # Cattura stdout + exit code
     assign_output=$(assign_extension "$local_file"; echo "___EXIT:$?")
     assign_exit_code=$(printf '%s' "$assign_output" | sed -n 's/.*___EXIT:\([0-9]\+\)/\1/p')
     assign_output=$(printf '%s' "$assign_output" | sed 's/___EXIT:.*//')
+    
 
-    # Cattura stdout + exit code
-    # # commento di prova
-    # new_filename=$(assign_extension "$local_file" | xargs)
-    
-    # # Prova
     new_filename=$(printf "%s" "$assign_output" | xargs)
-    
-    # printf "Debug interno 5 -> handle_file()::\t %s new_filename- $new_filename\t\n"
-    # # Commento di prova
-    # assign_exit_code=$?
-    # printf "Debug interno 6 -> handle_file()::\t %s assign_exit_code- $assign_exit_code\t\n"
 
     log_debug "🔎 assign_exit_code = $assign_exit_code"
     log_debug "🧪 assign_output = '$assign_output'"
     log_debug "📝 new_filename = '$new_filename'"
 
-    # # Prova
+
     if [[ "$assign_exit_code" -eq 42 ]]; then
+        # Caso 1: MIME non mappato → prosegui col nome originale
         log_info "⚠️ MIME non mappato per '$filename' → si prosegue con nome originale"
         new_filename="$filename"
-    fi
+        remote_path="$REMOTE_DIR/$new_filename"
 
-    # # Prova
-    if [[ "$assign_exit_code" -ne 0 ]]; then
+    elif [[ "$assign_exit_code" -ne 0 ]]; then
+        # Errore vero → interrompi
         log_error "❌ assign_extension failed for '$filename' (code: $assign_exit_code)"
         send_error_mail
         cleanup_lock
         EXIT_REASON="ERR"
         return 1
-    fi
 
-    if [[ -z "$new_filename" ]]; then
+    elif [[ -z "$new_filename" ]]; then
+        # Errore anomalo
         log_error "new_filename is unexpectedly empty after assign_extension"
         send_error_mail
         cleanup_lock
         EXIT_REASON="ERR"
         return 1
-    fi
 
-    # # Commento di prova
-    # if [[ "$assign_exit_code" -eq 42 ]]; then
-    #     EXIT_REASON="SKIP"
-    #     log_info "⚠️ MIME unassigned: skipping '$filename' (exit 42 from assign_extension)"
-    #     cleanup_lock
-    #     return 0
-    # fi
+    else
+        # Caso 2 e 3: MIME mappato, estensione assente o già presente
+        save_filename=$(clean_name "$new_filename")
 
-    # Clean name
-    local save_filename
-    save_filename=$(clean_name "$new_filename")
+        if [[ "$save_filename" != "$filename" ]]; then
+            log_debug "🔁 Clean name differente: '$filename' → '$save_filename'"
+            if ! mv "$local_file" "$LOCAL_DIR/$save_filename"; then
+                log_error "Rename failed: '$filename' → '$save_filename'"
+                send_error_mail
+                cleanup_lock
+                EXIT_REASON="ERR"
+                return 1
+            fi
 
-    # Se è cambiato qualcosa → rinomina file
-    if [[ "$save_filename" != "$filename" ]]; then
-        log_debug "🔁 Clean name differente: '$filename' → '$save_filename'"
-        if ! mv "$local_file" "$LOCAL_DIR/$save_filename"; then
-            log_error "Rename failed: '$filename' → '$save_filename'"
-            send_error_mail
-            cleanup_lock
-            EXIT_REASON="ERR"
-            return 1
+            # Aggiorna variabili coerenti
+            filename="$save_filename"
+            local_file="$LOCAL_DIR/$filename"
         fi
 
-        # Aggiorna variabili coerenti
-        filename="$save_filename"
-        local_file="$LOCAL_DIR/$filename"
         remote_path="$REMOTE_DIR/$filename"
-
-        log_info "📦 File renamed to: '$filename'"
     fi
 
     # === 4. Upload con gestione conflitti ===
@@ -547,13 +518,15 @@ handle_file() {
             NEW_NAME="${BASE}-(copia ${COUNT}).${EXT}"
         done
 
-        local new_remote_path="$REMOTE_DIR/$NEW_NAME"
+        new_remote_path="$REMOTE_DIR/$NEW_NAME"
         if ! rclone copyto "$local_file" "$new_remote_path"; then
             log_error "⚠️ Conflict upload failed: '$filename' → '$NEW_NAME'"
             send_error_mail
             EXIT_REASON="ERR"
             return 1
         fi
+        log_info "📤 Conflict upload completed: '$filename' → '$NEW_NAME'"
+
     else
         # Nessun conflitto → upload normale
         if ! rclone copyto "$local_file" "$remote_path"; then
