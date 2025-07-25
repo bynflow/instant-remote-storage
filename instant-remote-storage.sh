@@ -21,7 +21,9 @@ log_info()    { logger -t "$LOG_TAG" "[INFO]    $*;"; }
 log_debug()   { [[ "$DEBUG" == "1" ]] && logger -t "$LOG_TAG" "[DEBUG]   $*"; }
 log_warning() { logger -t "$LOG_TAG" "[WARNING] $*"; }
 log_error()   { logger -t "$LOG_TAG" "[ERROR]   $*"; }
+# ========================
 
+# === Email ===
 ENV_PATH="$HOME/.env"
 if [[ -f "$ENV_PATH" ]]; then
     # shellcheck source=/dev/null
@@ -70,6 +72,7 @@ EOF
         echo "$body_head$body_tail"
     } | msmtp --from="$from_account" -t 2>/dev/null
 }
+# ========================
 
 # === Configuration variables ===
 LOCAL_DIR="$HOME/storage-remoto-nextcloud"
@@ -109,6 +112,7 @@ fi
 
 # Create a unique temporary lock directory (will be cleaned up automatically at script exit)
 LOCKDIR="$(mktemp -d /tmp/irs-locks.XXXXXX)"
+
 # Mappe per evitare duplicati già elaborati
 declare -A HASH_SEEN=()
 declare -A FILE_SEEN=()
@@ -184,6 +188,7 @@ declare -A MIME_EXTENSIONS=(
     # Other
     ["application/octet-stream"]="bin"
 )
+# ========================
 
 # Composite extensions (e.g., .tar.gz)
 composite_exts=("tar.gz" "tar.bz2" "tar.xz" "tar.zst" "tar.lz4" "tar.br")
@@ -230,7 +235,8 @@ get_mime() {
 # Determines the correct extension based on MIME type
 # Returns new filename if extension is added or corrected
 assign_extension() {
-    local file_path="$1"
+    local file_path
+    file_path="$1"
     local original_name
     original_name=$(basename "$file_path")
 
@@ -251,7 +257,17 @@ assign_extension() {
         return 42
     fi
 
+    # local ext="${MIME_EXTENSIONS[$mime]:-}"
+    # printf "Debug interno 2,2 -> assign_extension()::\t %s ext- $ext\t\n" >&2
+    # if [[ -z "$ext" ]]; then
+    #     log_warning "MIME '$mime' not mapped. Skipping extension assignment."
+    #     printf "%s\n" "$original_name"
+    #     # printf "Debug interno 2,2 -> assign_extension(condizione 'ext')::\t %s original_name- $original_name\t\n" >&2
+    #     return 42
+    # fi
+
     local ext="${MIME_EXTENSIONS[$mime]:-}"
+    
     # printf "Debug interno 2,2 -> assign_extension()::\t %s ext- $ext\t\n" >&2
     if [[ -z "$ext" ]]; then
         log_warning "MIME '$mime' not mapped. Skipping extension assignment."
@@ -362,6 +378,9 @@ handle_file() {
     local local_file="$1"
     local filename="$2"
     local remote_path="$REMOTE_DIR/$filename"
+    local EXIT_REASON
+
+    trap '[ "$EXIT_REASON" != "OK" ] && log_warning "⛔ handle_file crashed or exited early — cleaning up lock."; cleanup_lock' RETURN
 
     log_debug "➡️ handle_file: inizio per '$filename'"
 
@@ -405,8 +424,7 @@ handle_file() {
 
     log_debug "🔒 Lock acquired for '$filename'"
 
-    local EXIT_REASON="OK"
-    trap '[ "$EXIT_REASON" != "OK" ] && log_warning "⛔ handle_file crashed or exited early — cleaning up lock."; cleanup_lock' RETURN
+    EXIT_REASON="OK"
 
     # === 2. Pre-check: stabilità, file nascosti, visibilità ===
     if ! wait_for_stable_file "$local_file"; then
@@ -432,31 +450,65 @@ handle_file() {
         return 0
     }
 
-    # === 3. Rinominazione MIME + clean name ===
+    # === 3. Rinomina MIME + clean name ===
     local new_filename
     local assign_exit_code
 
+    # # Aggiunta VAR di prova
+    local assign_output
+    # assign_output="$(assign_extension "$local_file")"
+
+    # # Blocco di prova
+    assign_output=$(assign_extension "$local_file"; echo "___EXIT:$?")
+    assign_exit_code=$(printf '%s' "$assign_output" | sed -n 's/.*___EXIT:\([0-9]\+\)/\1/p')
+    assign_output=$(printf '%s' "$assign_output" | sed 's/___EXIT:.*//')
+
     # Cattura stdout + exit code
-    new_filename=$(assign_extension "$local_file" | xargs)
-    assign_exit_code=$?
+    # # commento di prova
+    # new_filename=$(assign_extension "$local_file" | xargs)
+    
+    # # Prova
+    new_filename=$(printf "%s" "$assign_output" | xargs)
+    
+    # printf "Debug interno 5 -> handle_file()::\t %s new_filename- $new_filename\t\n"
+    # # Commento di prova
+    # assign_exit_code=$?
     # printf "Debug interno 6 -> handle_file()::\t %s assign_exit_code- $assign_exit_code\t\n"
 
     log_debug "🔎 assign_exit_code = $assign_exit_code"
+    log_debug "🧪 assign_output = '$assign_output'"
     log_debug "📝 new_filename = '$new_filename'"
 
-    if [[ -z "$new_filename" ]]; then
-        log_error "new_filename is unexpectedly empty after assign_extension"
+    # # Prova
+    if [[ "$assign_exit_code" -eq 42 ]]; then
+        log_info "⚠️ MIME non mappato per '$filename' → si prosegue con nome originale"
+        new_filename="$filename"
+    fi
+
+    # # Prova
+    if [[ "$assign_exit_code" -ne 0 ]]; then
+        log_error "❌ assign_extension failed for '$filename' (code: $assign_exit_code)"
+        send_error_mail
         cleanup_lock
         EXIT_REASON="ERR"
         return 1
     fi
 
-    if [[ "$assign_exit_code" -eq 42 ]]; then
-        EXIT_REASON="SKIP"
-        log_info "⚠️ MIME unassigned: skipping '$filename' (exit 42 from assign_extension)"
+    if [[ -z "$new_filename" ]]; then
+        log_error "new_filename is unexpectedly empty after assign_extension"
+        send_error_mail
         cleanup_lock
-        return 0
+        EXIT_REASON="ERR"
+        return 1
     fi
+
+    # # Commento di prova
+    # if [[ "$assign_exit_code" -eq 42 ]]; then
+    #     EXIT_REASON="SKIP"
+    #     log_info "⚠️ MIME unassigned: skipping '$filename' (exit 42 from assign_extension)"
+    #     cleanup_lock
+    #     return 0
+    # fi
 
     # Clean name
     local save_filename
