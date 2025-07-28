@@ -86,7 +86,9 @@ REQUIRED_CMDS=(rclone inotifywait md5sum date grep find awk mapfile msmtp)
 for cmd in "${REQUIRED_CMDS[@]}"; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         log_error "Missing required command: '$cmd'"
-        send_error_mail
+        if ! send_error_mail; then
+            log_warning "❗ send_error_mail failed or unavailable"
+        fi
         exit 1
     fi
 done
@@ -94,7 +96,9 @@ done
 # Ensure local directory exists
 mkdir -p "$LOCAL_DIR" || {
     log_error "Failed to create local directory: $LOCAL_DIR"
-    send_error_mail
+    if ! send_error_mail; then
+        log_warning "❗ send_error_mail failed or unavailable"
+    fi
     exit 1
 }
 
@@ -106,7 +110,9 @@ fi
 # Check remote connection
 if ! rclone lsf "$REMOTE_DIR" &>/dev/null; then
     log_error "Remote '$REMOTE_DIR' not reachable"
-    send_error_mail
+    if ! send_error_mail; then
+        log_warning "❗ send_error_mail failed or unavailable"
+    fi
     exit 1
 fi
 
@@ -366,7 +372,7 @@ handle_file() {
     local remote_path="$REMOTE_DIR/$filename"
     local EXIT_REASON
 
-    trap '[ "$EXIT_REASON" != "OK" ] && log_warning "⛔ handle_file crashed or exited early — cleaning up lock."; cleanup_lock' RETURN
+    trap '[ "$EXIT_REASON" != "OK" ] && log_warning "⛔ handle_file terminato prima del previsto (hash già processato o errore precedente) — cleaning up lock."; cleanup_lock' RETURN
 
     log_debug "➡️ handle_file: inizio per '$filename'"
 
@@ -375,7 +381,9 @@ handle_file() {
     local_hash=$(compute_hash "$local_file")
     [[ -z "$local_hash" ]] && {
         log_error "❌ Hash failed: '$filename'"
-        send_error_mail
+        if ! send_error_mail; then
+            log_warning "❗ send_error_mail failed or unavailable"
+        fi
         EXIT_REASON="ERR"
         return 1
     }
@@ -399,7 +407,7 @@ handle_file() {
     FILE_SEEN["$filename"]=1
 
     # Procedura di lock (per evitare doppio trigger da inotify)
-    local HASHLOCK="$LOCKDIR/${local_hash}.lock"
+    local HASHLOCK # ="$LOCKDIR/${local_hash}.lock"
     HASHLOCK="$LOCKDIR/${local_hash}.lock"
     if [[ -e "$HASHLOCK" ]]; then
         log_debug "⏳ Hash '$local_hash' is currently locked. Skipping duplicate trigger."
@@ -469,7 +477,9 @@ handle_file() {
     elif [[ "$assign_exit_code" -ne 0 ]]; then
         # Errore vero → interrompi
         log_error "❌ assign_extension failed for '$filename' (code: $assign_exit_code)"
-        send_error_mail
+        if ! send_error_mail; then
+            log_warning "❗ send_error_mail failed or unavailable"
+        fi
         cleanup_lock
         EXIT_REASON="ERR"
         return 1
@@ -477,7 +487,9 @@ handle_file() {
     elif [[ -z "$new_filename" ]]; then
         # Errore anomalo
         log_error "new_filename is unexpectedly empty after assign_extension"
-        send_error_mail
+        if ! send_error_mail; then
+            log_warning "❗ send_error_mail failed or unavailable"
+        fi
         cleanup_lock
         EXIT_REASON="ERR"
         return 1
@@ -488,21 +500,40 @@ handle_file() {
 
         if [[ "$save_filename" != "$filename" ]]; then
             log_debug "🔁 Clean name differente: '$filename' → '$save_filename'"
-            if ! mv "$local_file" "$LOCAL_DIR/$save_filename"; then
-                log_error "Rename failed: '$filename' → '$save_filename'"
-                send_error_mail
-                cleanup_lock
-                EXIT_REASON="ERR"
-                return 1
+
+            local parent_dir
+            parent_dir=$(dirname "$filename")
+            mkdir -p "$LOCAL_DIR/$parent_dir"
+
+            # Check se la destinazione è lo stesso file
+            if [[ "$local_file" == "$LOCAL_DIR/$parent_dir/$save_filename" ]]; then
+                log_debug "🟡 Skip rename: sorgente e destinazione sono identici"
+            else
+
+                if ! mv "$local_file" "$LOCAL_DIR/$parent_dir/$save_filename"; then
+                    log_error "Rename failed: '$filename' → '$save_filename'"
+                    if ! send_error_mail; then
+                        log_warning "❗ send_error_mail failed or unavailable"
+                    fi
+                    cleanup_lock
+                    EXIT_REASON="ERR"
+                    return 1
+                fi
+
+                # Aggiorna variabili coerenti
+                filename="$parent_dir/$save_filename"
+                local_file="$LOCAL_DIR/$filename"
             fi
-
-            # Aggiorna variabili coerenti
-            filename="$save_filename"
-            local_file="$LOCAL_DIR/$filename"
         fi
-
         remote_path="$REMOTE_DIR/$filename"
     fi
+
+    # Assicura che la cartella remota esista
+    remote_dir_path=$(dirname "$remote_path")
+    if ! rclone mkdir "$remote_dir_path" >/dev/null 2>&1; then
+        log_warning "❗ Impossibile creare la directory remota: $remote_dir_path"
+    fi
+
 
     # === 4. Upload con gestione conflitti ===
     if rclone lsf "$remote_path" &>/dev/null; then
@@ -521,7 +552,9 @@ handle_file() {
         new_remote_path="$REMOTE_DIR/$NEW_NAME"
         if ! rclone copyto "$local_file" "$new_remote_path"; then
             log_error "⚠️ Conflict upload failed: '$filename' → '$NEW_NAME'"
-            send_error_mail
+            if ! send_error_mail; then
+                log_warning "❗ send_error_mail failed or unavailable"
+            fi
             EXIT_REASON="ERR"
             return 1
         fi
@@ -531,7 +564,9 @@ handle_file() {
         # Nessun conflitto → upload normale
         if ! rclone copyto "$local_file" "$remote_path"; then
             log_error "❌ Upload failed: '$filename'"
-            send_error_mail
+            if ! send_error_mail; then
+                log_warning "❗ send_error_mail failed or unavailable"
+            fi
             cleanup_lock
             EXIT_REASON="ERR"
             return 1
@@ -550,13 +585,35 @@ handle_file() {
 main_loop() {
     log_info "🚀 Starting instant-remote-storage watcher on $(hostname) at $(date)"
 
-    inotifywait -m -e close_write -e moved_to --format '%w%f:::%e' "$LOCAL_DIR" |
+    inotifywait -m -r -e close_write -e moved_to --format '%w%f:::%e' "$LOCAL_DIR" |
     while IFS=":::" read -r FULLPATH EVENT; do
-        FILENAME=$(basename "$FULLPATH")
-        log_debug "📥 Event '$EVENT' received for: $FILENAME"
+        RELATIVE_PATH="${FULLPATH#$LOCAL_DIR/}"
+        # FILENAME=$(basename "$FULLPATH")
 
-        handle_file "$FULLPATH" "$FILENAME"
+        log_debug "📥 Event '$EVENT' received for: $RELATIVE_PATH"
+
+        if [[ -d "$FULLPATH" ]]; then
+            # 1. Ricrea tutta la struttura di sottocartelle in remoto
+            log_debug "🛠️ Creazione ricorsiva directory remota per '$RELATIVE_PATH'"
+            find "$FULLPATH" -type d | while read -r DIR; do
+                SUBPATH="${DIR#"$LOCAL_DIR"/}"
+                rclone mkdir "$REMOTE_DIR/$SUBPATH" 2>/dev/null && \
+                    log_info "📁 Directory remota creata: '$REMOTE_DIR/$SUBPATH'" || \
+                    log_warning "⚠️ Impossibile creare directory remota: '$REMOTE_DIR/$SUBPATH'"
+            done
+
+            # 2. Elabora tutti i file contenuti ricorsivamente
+            find "$FULLPATH" -type f | while read -r FILE; do
+                RELFILE="${FILE#"$LOCAL_DIR"/}"
+                handle_file "$FILE" "$RELFILE"
+            done
+
+        elif [[ -f "$FULLPATH" ]]; then
+            # File singolo normale
+            handle_file "$FULLPATH" "$RELATIVE_PATH"
+        fi
     done
+
     log_info "🔁 Watch loop terminated unexpectedly"
 }
 
