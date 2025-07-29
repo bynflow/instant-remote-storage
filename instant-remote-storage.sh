@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 
+LOCKFILE="/tmp/instant-remote-storage.lock"
+exec 9>"$LOCKFILE"
+if ! flock -n 9; then
+    echo "⚠️ Already running. Exiting."
+    exit 1
+fi
+
 # ========================================
-# instant-remote-storage - v0.3.0
+# instant-remote-storage - v0.4.0
 # Author : Carlo Capobianchi (bynflow)
 # GitHub : https://github.com/bynflow
-# Last Modified: 2025-07-25
+# Last Modified: 2025-07-28
 # ========================================
 # Watches $HOME/storage-remoto-nextcloud and syncs files to
 # hetzner-nc:indifferenziato with MIME-based renaming and
@@ -22,6 +29,8 @@ log_debug()   { [[ "$DEBUG" == "1" ]] && logger -t "$LOG_TAG" "[DEBUG]   $*"; }
 log_warning() { logger -t "$LOG_TAG" "[WARNING] $*"; }
 log_error()   { logger -t "$LOG_TAG" "[ERROR]   $*"; }
 # ========================
+
+log_info "🔒 Acquisito lock globale — PID: $$"
 
 # === Email ===
 ENV_PATH="$HOME/.env"
@@ -119,10 +128,8 @@ fi
 # Create a unique temporary lock directory (will be cleaned up automatically at script exit)
 LOCKDIR="$(mktemp -d /tmp/irs-locks.XXXXXX)"
 
-# Mappe per evitare duplicati già elaborati
-declare -A HASH_SEEN=()
-declare -A FILE_SEEN=()
-declare -A HASH_PROCESSED=()
+declare -A PATH_HASH_SEEN=()    # Traccia hash + path + nome → deduplica effettiva
+declare -A FINAL_SEEN=()
 
 # === MIME to extension map (placeholder) ===
 declare -A MIME_EXTENSIONS=(
@@ -265,7 +272,6 @@ assign_extension() {
 
     local ext="${MIME_EXTENSIONS[$mime]:-}"
     
-    # printf "Debug interno 2,2 -> assign_extension()::\t %s ext- $ext\t\n" >&2
     if [[ -z "$ext" ]]; then
         log_warning "MIME '$mime' not mapped. Skipping extension assignment."
         printf "%s\n" "$original_name"
@@ -388,23 +394,12 @@ handle_file() {
         return 1
     }
 
-    # Evita rielaborazione se già processato
-    if [[ -n "${HASH_PROCESSED[$local_hash]:-}" ]]; then
-        log_debug "🟡 Hash '$local_hash' already processed. Skipping '$filename'."
-        EXIT_REASON="SKIP"
-        return 0
-    fi
+    log_debug "🎯 handle_file start: $filename + hash = $local_hash"
 
-    # Evita processamenti duplicati solo se hash + filename sono entrambi già visti
-    if [[ -n "${HASH_SEEN[$local_hash]:-}" && -n "${FILE_SEEN[$filename]:-}" ]]; then
-        log_debug "🟡 Already processed: '$filename' (hash: $local_hash). Skipping."
-        EXIT_REASON="SKIP"
-        return 0
-    fi
-
-    # Prosegui: registra questo file come visto
-    HASH_SEEN["$local_hash"]=1
-    FILE_SEEN["$filename"]=1
+    # Estrai path relativo e directory contenitore
+    local filepath="${local_file#"$LOCAL_DIR"/}"
+    local relative_path="${filepath%/*}"
+    [[ "$relative_path" == "$filepath" ]] && relative_path=""
 
     # Procedura di lock (per evitare doppio trigger da inotify)
     local HASHLOCK # ="$LOCKDIR/${local_hash}.lock"
@@ -467,7 +462,6 @@ handle_file() {
     log_debug "🧪 assign_output = '$assign_output'"
     log_debug "📝 new_filename = '$new_filename'"
 
-
     if [[ "$assign_exit_code" -eq 42 ]]; then
         # Caso 1: MIME non mappato → prosegui col nome originale
         log_info "⚠️ MIME non mappato per '$filename' → si prosegue con nome originale"
@@ -498,7 +492,7 @@ handle_file() {
         # Caso 2 e 3: MIME mappato, estensione assente o già presente
         save_filename=$(clean_name "$new_filename")
 
-        if [[ "$save_filename" != "$filename" ]]; then
+        if [[ "$save_filename" != "$(basename "$filename")" ]]; then
             log_debug "🔁 Clean name differente: '$filename' → '$save_filename'"
 
             local parent_dir
@@ -523,9 +517,31 @@ handle_file() {
                 # Aggiorna variabili coerenti
                 filename="$parent_dir/$save_filename"
                 local_file="$LOCAL_DIR/$filename"
+
+                # === Seconda verifica duplicati, dopo eventuale rinomina ===
+                local path_hash_key
+                path_hash_key="${local_hash}___${filename}"
+                if [[ -n "${PATH_HASH_SEEN[$path_hash_key]:-}" ]]; then
+                    log_debug "🟡 Already handled after rename: $path_hash_key"
+                    EXIT_REASON="SKIP"
+                    cleanup_lock
+                    return 0
+                fi
+                PATH_HASH_SEEN["$path_hash_key"]=1
             fi
         fi
+
         remote_path="$REMOTE_DIR/$filename"
+
+        local final_key="${local_hash}___${remote_path}"
+        if [[ -n "${FINAL_SEEN[$final_key]:-}" ]]; then
+            log_debug "🛑 Already uploaded: $final_key"
+            EXIT_REASON="SKIP"
+            cleanup_lock
+            return 0
+        fi
+        FINAL_SEEN["$final_key"]=1
+
     fi
 
     # Assicura che la cartella remota esista
@@ -574,7 +590,6 @@ handle_file() {
         log_info "✅ Upload completed: '$filename'"
     fi
     cleanup_lock
-    HASH_PROCESSED[$local_hash]=1
     log_info "📦 File '$filename' marked as processed (hash: $local_hash)"
 
     EXIT_REASON="OK"
@@ -585,40 +600,40 @@ handle_file() {
 main_loop() {
     log_info "🚀 Starting instant-remote-storage watcher on $(hostname) at $(date)"
 
-    inotifywait -m -r -e close_write -e moved_to --format '%w%f:::%e' "$LOCAL_DIR" |
     while IFS=":::" read -r FULLPATH EVENT; do
-        RELATIVE_PATH="${FULLPATH#$LOCAL_DIR/}"
-        # FILENAME=$(basename "$FULLPATH")
+        RELATIVE_PATH="${FULLPATH#"$LOCAL_DIR"/}"
 
         log_debug "📥 Event '$EVENT' received for: $RELATIVE_PATH"
 
         if [[ -d "$FULLPATH" ]]; then
-            # 1. Ricrea tutta la struttura di sottocartelle in remoto
-            log_debug "🛠️ Creazione ricorsiva directory remota per '$RELATIVE_PATH'"
-            find "$FULLPATH" -type d | while read -r DIR; do
+            # 🔁 Replica tutta la struttura, anche se vuota
+            log_debug "🛠️ Ricostruzione struttura remota per '$RELATIVE_PATH'"
+            while read -r DIR; do
                 SUBPATH="${DIR#"$LOCAL_DIR"/}"
-                rclone mkdir "$REMOTE_DIR/$SUBPATH" 2>/dev/null && \
-                    log_info "📁 Directory remota creata: '$REMOTE_DIR/$SUBPATH'" || \
+                if rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1; then
+                    log_info "📁 Directory remota creata: '$REMOTE_DIR/$SUBPATH'"
+                else
                     log_warning "⚠️ Impossibile creare directory remota: '$REMOTE_DIR/$SUBPATH'"
-            done
+                fi
+            done < <(find "$FULLPATH" -type d)
 
-            # 2. Elabora tutti i file contenuti ricorsivamente
-            find "$FULLPATH" -type f | while read -r FILE; do
+            # 📄 Elabora tutti i file contenuti
+            while read -r FILE; do
                 RELFILE="${FILE#"$LOCAL_DIR"/}"
                 handle_file "$FILE" "$RELFILE"
-            done
+            done < <(find "$FULLPATH" -type f)
 
         elif [[ -f "$FULLPATH" ]]; then
-            # File singolo normale
+            # 📄 File singolo normale
             handle_file "$FULLPATH" "$RELATIVE_PATH"
         fi
-    done
+    done < <(inotifywait -m -r -e close_write,moved_to --format '%w%f:::%e' "$LOCAL_DIR")
 
-    log_info "🔁 Watch loop terminated unexpectedly"
+    log_info "🚨 Watch loop has terminated unexpectedly. Restart recommended."
 }
 
 # === Signal Handlers ===
-trap 'log_error "Unhandled error at line $LINENO: command \`$BASH_COMMAND\` exited with $?"; send_error_mail' ERR
+trap 'log_error "Unhandled error at line $LINENO: command \`$BASH_COMMAFND\` exited with $?"; send_error_mail' ERR
 trap 'log_info "instant-remote-storage exited at $(date "+%Y-%m-%d %H:%M:%S")"' EXIT
 # Clean up entire lockdir when script exits (even with Ctrl+C)
 trap 'rm -rf "$LOCKDIR"' EXIT
