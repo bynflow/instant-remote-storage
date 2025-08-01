@@ -601,6 +601,14 @@ handle_file() {
             return 1
         fi
         log_info "📤 Conflict upload completed: '$filename' → '$NEW_NAME'"
+        # File protetto da modifiche locali - per riportare un file alla scrivibilità locale → 'chmod u+w nomefile' ↓
+        # la modifica di un file può poratare a comportamenti imprevedibili tipo duplicazioni inattese, apportare
+        # per tanto modifiche soltanto fuori dalla cartella $LOCAL_DIR
+        if [[ -f "$local_file" ]]; then
+            chmod 444 "$local_file"
+            log_debug "🔒 chmod 444 applicato a: $local_file (file protetto da modifiche locali)"
+        fi
+
 
     else
 
@@ -624,6 +632,14 @@ handle_file() {
             return 1
         fi
         log_info "✅ Upload completed: '$filename'"
+        # File protetto da modifiche locali - per riportare un file alla scrivibilità locale → 'chmod u+w nomefile' ↓
+        # la modifica di un file può poratare a comportamenti imprevedibili tipo duplicazioni inattese, apportare
+        # per tanto modifiche soltanto fuori dalla cartella $LOCAL_DIR
+        if [[ -f "$local_file" ]]; then
+            chmod 444 "$local_file"
+            log_debug "🔒 chmod 444 applicato a: $local_file (file protetto da modifiche locali)"
+        fi
+
     fi
     cleanup_lock
     log_info "📦 File '$filename' marked as processed (hash: $hash)"
