@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+# Questo fa in modo tale che lo script parta una sola volta ← LUCCHETTO intero script
 LOCKFILE="/tmp/instant-remote-storage.lock"
 exec 9>"$LOCKFILE"
 if ! flock -n 9; then
@@ -8,10 +9,10 @@ if ! flock -n 9; then
 fi
 
 # ========================================
-# instant-remote-storage - v0.4.0
+# instant-remote-storage - v0.5.0
 # Author : Carlo Capobianchi (bynflow)
 # GitHub : https://github.com/bynflow
-# Last Modified: 2025-07-28
+# Last Modified: 2025-07-31
 # ========================================
 # Watches $HOME/storage-remoto-nextcloud and syncs files to
 # hetzner-nc:indifferenziato with MIME-based renaming and
@@ -30,6 +31,7 @@ log_warning() { logger -t "$LOG_TAG" "[WARNING] $*"; }
 log_error()   { logger -t "$LOG_TAG" "[ERROR]   $*"; }
 # ========================
 
+# Qui informa circa il numero di processo dello script
 log_info "🔒 Acquisito lock globale — PID: $$"
 
 # === Email ===
@@ -126,10 +128,11 @@ if ! rclone lsf "$REMOTE_DIR" &>/dev/null; then
 fi
 
 # Create a unique temporary lock directory (will be cleaned up automatically at script exit)
-LOCKDIR="$(mktemp -d /tmp/irs-locks.XXXXXX)"
+LOCKDIR="$(mktemp -d /tmp/irs-locks.XXXXXX)"    # ← LUCCHETTO intero ciclo (+ hash del file) ↓
 
-declare -A PATH_HASH_SEEN=()    # Traccia hash + path + nome → deduplica effettiva
-declare -A FINAL_SEEN=()
+declare -A PATH_HASH_SEEN=()    # Traccia path LOCALE + nome + hash → deduplica effettiva
+path_hash_key=""
+declare -A FINAL_SEEN=()        # Traccia path REMOTO + nome + hash → skip upload
 
 # === MIME to extension map (placeholder) ===
 declare -A MIME_EXTENSIONS=(
@@ -226,7 +229,7 @@ split_base_ext() {
     local filename="$1"
     for ext in "${composite_exts[@]}"; do
         [[ "$filename" == *".${ext}" ]] && {
-            echo "${filename%."$ext"}:::${ext}"
+            echo "${filename%."$ext"}:::${ext}" # Da intendere come lavora questa riga
             return
         }
     done
@@ -373,19 +376,19 @@ compute_hash() {
 }
 
 handle_file() {
-    local local_file="$1"
-    local filename="$2"
+    local local_file="$1"   # path assoluto
+    local filename="$2"     # path relativo + nome_file OPPURE solo filename se file in radice
     local remote_path="$REMOTE_DIR/$filename"
-    local EXIT_REASON
+    local EXIT_REASON=""
 
-    trap '[ "$EXIT_REASON" != "OK" ] && log_warning "⛔ handle_file terminato prima del previsto (hash già processato o errore precedente) — cleaning up lock."; cleanup_lock' RETURN
+    trap '[ "$EXIT_REASON" != "OK" ] && log_warning "⛔ handle_file EXIT_REASON='"$EXIT_REASON"' at line $LINENO: command \`$BASH_COMMAND\` exited with $? — cleaning up lock."; cleanup_lock' RETURN
 
-    log_debug "➡️ handle_file: inizio per '$filename'"
+    log_debug "➡️ handle_file: inizio per '$filename'" # ← cartella_relativa+nome_file
 
     # === 1. Calcolo hash e gestione lock ===
-    local local_hash
-    local_hash=$(compute_hash "$local_file")
-    [[ -z "$local_hash" ]] && {
+    local hash
+    hash=$(compute_hash "$local_file")
+    [[ -z "$hash" ]] && {
         log_error "❌ Hash failed: '$filename'"
         if ! send_error_mail; then
             log_warning "❗ send_error_mail failed or unavailable"
@@ -394,22 +397,27 @@ handle_file() {
         return 1
     }
 
-    log_debug "🎯 handle_file start: $filename + hash = $local_hash"
+    log_debug "🎯 handle_file start: $filename + hash = $hash"
 
     # Estrai path relativo e directory contenitore
-    local filepath="${local_file#"$LOCAL_DIR"/}"
-    local relative_path="${filepath%/*}"
-    [[ "$relative_path" == "$filepath" ]] && relative_path=""
+    # Qui, se il file è nella root ('indifferenziato') $filepath e
+    # $relative_path saranno uguali al nome del file, quindi si corregge
+    # $relative_path con =""
+    local filepath="${local_file#"$LOCAL_DIR"/}"    # path relativo+nome file
+    local relative_path="${filepath%/*}"            # path relativo (senza nome file)
+    log_debug "relative_path al rigo 403: $relative_path"
+    [[ "$relative_path" == "$filepath" ]] && relative_path=""   # <<--- Non viene usato
 
-    # Procedura di lock (per evitare doppio trigger da inotify)
-    local HASHLOCK # ="$LOCKDIR/${local_hash}.lock"
-    HASHLOCK="$LOCKDIR/${local_hash}.lock"
+    # Procedura di lock (per evitare doppio trigger da inotify) ← LUCCHETTO intero ciclo ↑
+    local HASHLOCK # ="$LOCKDIR/${hash}.lock"
+    HASHLOCK="$LOCKDIR/${hash}.lock"
     if [[ -e "$HASHLOCK" ]]; then
-        log_debug "⏳ Hash '$local_hash' is currently locked. Skipping duplicate trigger."
+        log_debug "⏳ Hash '$hash' is currently locked. Skipping duplicate trigger."
         EXIT_REASON="LOCK"
         return 0
     fi
-    touch "$HASHLOCK"
+    touch "$HASHLOCK"   # <<------------- verificare l'efficacia di questo sistema
+    log_debug "Lucchetto creato: $HASHLOCK"
 
     log_debug "🔒 Lock acquired for '$filename'"
 
@@ -431,7 +439,8 @@ handle_file() {
         return 0
     }
 
-    # Skippa file temporanei o dotfile
+    # Skippa file temporanei o dotfile - quindi esce dal ciclo con 'return 0' poi
+    # inotifywait resta in attesa di altri eventi
     [[ "$filename" =~ ^\.goutputstream || "$filename" =~ \.(swp|part|tmp|bak)$ || "$filename" =~ ^\..* ]] && {
         log_warning "⏭️ Skipped unsupported: '$filename'"
         cleanup_lock
@@ -440,9 +449,9 @@ handle_file() {
     }
 
     # # # === Inizio della logica principale ===
-    # new_filename ha 3 possibilità: 1. è come $filename non modificato,
-    # 2. è filename più l'aggiunta di una estensione, 3. è lasciato com'era perché
-    # non è stato riconosciuto né il MIME nè quindi l'estensione
+    # new_filename ha 3 possibilità: 1. è come $filename non modificato perché è ben formato con estensione corretta,
+    # 2. è filename più l'aggiunta di una estensione, 3. è lasciato com'è perché
+    # non è stato riconosciuto né il MIME né l'estensione
     local new_filename
     local assign_exit_code
 
@@ -453,7 +462,7 @@ handle_file() {
     # Cattura stdout + exit code
     assign_output=$(assign_extension "$local_file"; echo "___EXIT:$?")
     assign_exit_code=$(printf '%s' "$assign_output" | sed -n 's/.*___EXIT:\([0-9]\+\)/\1/p')
-    assign_output=$(printf '%s' "$assign_output" | sed 's/___EXIT:.*//')
+    assign_output=$(printf '%s' "$assign_output" | sed 's/___EXIT:.*//')    # Output del filename ancora eventualmente malformato ma con estensione assegnata
     
 
     new_filename=$(printf "%s" "$assign_output" | xargs)
@@ -491,20 +500,44 @@ handle_file() {
     else
         # Caso 2 e 3: MIME mappato, estensione assente o già presente
         save_filename=$(clean_name "$new_filename")
+        log_debug "Questo è il 'save_filename': '$save_filename' appena ripulito da clean_name()"
 
-        if [[ "$save_filename" != "$(basename "$filename")" ]]; then
+        if [[ "$save_filename" != "$(basename "$filename")" ]]; then    # Qui $filename è ancora il path relativo + il filename grezzo, prima di clean_name, il basename è solo il nome del file
             log_debug "🔁 Clean name differente: '$filename' → '$save_filename'"
 
             local parent_dir
             parent_dir=$(dirname "$filename")
-            mkdir -p "$LOCAL_DIR/$parent_dir"
+            log_debug "Questo è 'parent_dir': $parent_dir"
+            # mkdir -p "$LOCAL_DIR/$parent_dir"   # <<----------------verificarne il senso
 
             # Check se la destinazione è lo stesso file
-            if [[ "$local_file" == "$LOCAL_DIR/$parent_dir/$save_filename" ]]; then
+            if [[ "$local_file" == "$LOCAL_DIR/$parent_dir/$save_filename" ]]; then # $local_file è il path assoluto + nome -- $LOCAL_DIR/$parent_dir/$save_filename è il path assoluto + nome sanificato
                 log_debug "🟡 Skip rename: sorgente e destinazione sono identici"
             else
 
-                if ! mv "$local_file" "$LOCAL_DIR/$parent_dir/$save_filename"; then
+                log_debug "RIGO 520 - parent_dir → $parent_dir _  save_filename → $save_filename"
+                # Aggiorna variabili coerenti
+                filename="$parent_dir/$save_filename" # NUOVO FILENAME - Qui filename viene rinominato per la PRIMA e UNICA volta
+                filename="${filename#./}"  # ← Elimina prefisso ./ se presente
+                log_debug "RIGO 520 - filename → $filename"
+
+                # === Seconda verifica duplicati, dopo eventuale rinomina ===
+                # local path_hash_key
+                path_hash_key="${hash}___${filename}" # Hash + filename nuovo ---------->> questo sistema è qui perché qui si crea il MOVE_TO e non se il file non venisse rinominato
+                if [[ -n "${PATH_HASH_SEEN[$path_hash_key]:-}" ]]; then # ← Traccia LOCALE
+                    log_debug "🟡 Already handled after rename: $path_hash_key"
+                    EXIT_REASON="SKIP"
+                    cleanup_lock
+                    return 0
+                fi
+                PATH_HASH_SEEN["$path_hash_key"]=1
+                log_debug "RIGO 524 - path_hash_key → $path_hash_key"
+                log_debug "RIGO 533 - PATH_HASH_SEEN[path_hash_key] → PATH_HASH_SEEN[$path_hash_key]"
+
+                log_debug "parent_dir rigo 533: $parent_dir"    # ---- Verificare se nel caso il path+ filename siano identici ma hash diversi cosa succede i locale vosto che al momento sembra
+                # che in locale il file venga sovrascritto
+                if ! mv "$local_file" "$LOCAL_DIR/$parent_dir/$save_filename"; then # Qui il file reale $local_file viene rinominato per la PRIMA e UNICA volta (in path-assoluto+nome-normalizzato)
+                    unset "PATH_HASH_SEEN[$path_hash_key]"
                     log_error "Rename failed: '$filename' → '$save_filename'"
                     if ! send_error_mail; then
                         log_warning "❗ send_error_mail failed or unavailable"
@@ -514,47 +547,28 @@ handle_file() {
                     return 1
                 fi
 
-                # Aggiorna variabili coerenti
-                filename="$parent_dir/$save_filename"
-                local_file="$LOCAL_DIR/$filename"
+                # Qui la variabile $local_file viene rinominata per la PRIMA e UNICA volta ← NOME DEL FILE MODIFICATO - path identico
+                local_file="$LOCAL_DIR/$filename"   # qui path assoluto + nome
 
-                # === Seconda verifica duplicati, dopo eventuale rinomina ===
-                local path_hash_key
-                path_hash_key="${local_hash}___${filename}"
-                if [[ -n "${PATH_HASH_SEEN[$path_hash_key]:-}" ]]; then
-                    log_debug "🟡 Already handled after rename: $path_hash_key"
-                    EXIT_REASON="SKIP"
-                    cleanup_lock
-                    return 0
-                fi
-                PATH_HASH_SEEN["$path_hash_key"]=1
             fi
         fi
 
-        remote_path="$REMOTE_DIR/$filename"
-
-        local final_key="${local_hash}___${remote_path}"
-        if [[ -n "${FINAL_SEEN[$final_key]:-}" ]]; then
-            log_debug "🛑 Already uploaded: $final_key"
-            EXIT_REASON="SKIP"
-            cleanup_lock
-            return 0
-        fi
-        FINAL_SEEN["$final_key"]=1
+        remote_path="$REMOTE_DIR/$filename" # Qui abbiamo il remote_path di inizio funzione se il filename normalizzato è identico a quello originario, altrimenti abbiamo col nuovo filename
+        log_debug "'filename' FUORI 'if [[ save_filename != basename filename) ]]' (cioè i 2 termini sono uguali) - al rigo 555: $filename"
 
     fi
 
     # Assicura che la cartella remota esista
-    remote_dir_path=$(dirname "$remote_path")
+    remote_dir_path=$(dirname "$remote_path")   # remote_path→path assoluto + nome originario o nome sanificato |||| remote_dir_path → path assoluto senza nome del file
     if ! rclone mkdir "$remote_dir_path" >/dev/null 2>&1; then
         log_warning "❗ Impossibile creare la directory remota: $remote_dir_path"
     fi
 
-
     # === 4. Upload con gestione conflitti ===
     if rclone lsf "$remote_path" &>/dev/null; then
         # Conflitto nome → genera filename alternativo
-        IFS=":::" read -r BASE EXT <<< "$(split_base_ext "$filename")"
+        log_debug "filename riga 563 prima di eventuale rinomina con (copia [n°]): $filename"
+        IFS=":::" read -r BASE EXT <<< "$(split_base_ext "$filename")"  # Fare un check sul modo in cui funziona la funzione visto che filename è path relativo+nome del file
         COUNT=1
         BASE="${BASE//:/}"
         EXT="${EXT//:/}"
@@ -566,6 +580,18 @@ handle_file() {
         done
 
         new_remote_path="$REMOTE_DIR/$NEW_NAME"
+        log_debug "new_remote_path riga 574 dopo eventuale rinomina con (copia [n°]): $new_remote_path"
+
+        local final_key
+        final_key="${hash}___${new_remote_path}"
+        if [[ -n "${FINAL_SEEN[$final_key]:-}" ]]; then # Traccia REMOTA
+            log_debug "🛑 Already uploaded (renamed): $final_key"
+            EXIT_REASON="SKIP"
+            cleanup_lock
+            return 0
+        fi
+        FINAL_SEEN["$final_key"]=1
+
         if ! rclone copyto "$local_file" "$new_remote_path"; then
             log_error "⚠️ Conflict upload failed: '$filename' → '$NEW_NAME'"
             if ! send_error_mail; then
@@ -577,8 +603,18 @@ handle_file() {
         log_info "📤 Conflict upload completed: '$filename' → '$NEW_NAME'"
 
     else
+
+        local final_key="${hash}___${remote_path}"    # <<------------- forse (anche) questo non ha senso perché il file essendo già presente è già passato per la rinomina con (copia [n°])
+        if [[ -n "${FINAL_SEEN[$final_key]:-}" ]]; then # Traccia REMOTA
+            log_debug "🛑 Already uploaded: $final_key"
+            EXIT_REASON="SKIP"
+            cleanup_lock
+            return 0
+        fi
+        FINAL_SEEN["$final_key"]=1
+
         # Nessun conflitto → upload normale
-        if ! rclone copyto "$local_file" "$remote_path"; then
+        if ! rclone copyto "$local_file" "$remote_path"; then   # local_file → path assoluto più nome originario o sanitizzato - remote_path → path remoto assoluto più nome originario o sanitizzato
             log_error "❌ Upload failed: '$filename'"
             if ! send_error_mail; then
                 log_warning "❗ send_error_mail failed or unavailable"
@@ -590,7 +626,7 @@ handle_file() {
         log_info "✅ Upload completed: '$filename'"
     fi
     cleanup_lock
-    log_info "📦 File '$filename' marked as processed (hash: $local_hash)"
+    log_info "📦 File '$filename' marked as processed (hash: $hash)"
 
     EXIT_REASON="OK"
     log_debug "⬅️ handle_file: fine per '$filename'"
@@ -601,16 +637,17 @@ main_loop() {
     log_info "🚀 Starting instant-remote-storage watcher on $(hostname) at $(date)"
 
     while IFS=":::" read -r FULLPATH EVENT; do
-        RELATIVE_PATH="${FULLPATH#"$LOCAL_DIR"/}"
-
+        RELATIVE_PATH="${FULLPATH#"$LOCAL_DIR"/}"   # Path relativo + Filename OPPURE solo Filename (se il file è nella cartella radice)
+        RELATIVE_PATH="${RELATIVE_PATH#./}"  # ← Elimina prefisso ./ se presente
+        log_debug "RELATIVE_PATH alla riga 633 in main_loop: $RELATIVE_PATH"
         log_debug "📥 Event '$EVENT' received for: $RELATIVE_PATH"
 
         if [[ -d "$FULLPATH" ]]; then
             # 🔁 Replica tutta la struttura, anche se vuota
-            log_debug "🛠️ Ricostruzione struttura remota per '$RELATIVE_PATH'"
+            log_debug "🛠️ Ricostruzione struttura remota per '$RELATIVE_PATH'"  # ← Questo log non viene registrato anche se dovrebbe
             while read -r DIR; do
                 SUBPATH="${DIR#"$LOCAL_DIR"/}"
-                if rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1; then
+                if rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1; then    # ← Questo mkdir per remoto è già operato in handle_file ma il log seguente ↓ non viene registrato quindi il comando forse non viene dato mai
                     log_info "📁 Directory remota creata: '$REMOTE_DIR/$SUBPATH'"
                 else
                     log_warning "⚠️ Impossibile creare directory remota: '$REMOTE_DIR/$SUBPATH'"
@@ -620,11 +657,41 @@ main_loop() {
             # 📄 Elabora tutti i file contenuti
             while read -r FILE; do
                 RELFILE="${FILE#"$LOCAL_DIR"/}"
+                log_debug "RELFILE alla riga 658 in main_loop: $RELFILE"
                 handle_file "$FILE" "$RELFILE"
             done < <(find "$FULLPATH" -type f)
 
+        # Old
+        # elif [[ -f "$FULLPATH" ]]; then
+        #     # 📄 File singolo normale
+        #     # log_debug "Sono in 'main_loop': FULLPATH → $FULLPATH - RELATIVE_PATH → $RELATIVE_PATH"
+        #     handle_file "$FULLPATH" "$RELATIVE_PATH"
+        # fi
         elif [[ -f "$FULLPATH" ]]; then
             # 📄 File singolo normale
+
+            # Calcola hash e path_hash_key come in handle_file
+            local FILE_HASH
+            FILE_HASH=$(compute_hash "$FULLPATH")
+            if [[ -z "$FILE_HASH" ]]; then
+                log_warning "⚠️ Hash non calcolabile per $FULLPATH, passo oltre"
+                continue
+            fi
+
+            path_hash_key="${FILE_HASH}___${RELATIVE_PATH}"
+            log_debug "RIGO 680 - path_hash_key → $path_hash_key"
+
+            if [[ -n "${PATH_HASH_SEEN[$path_hash_key]:-}" ]]; then
+                log_debug "🟡 Already handled in main_loop: $path_hash_key"
+                log_warning "📛 Skipped early in main_loop (already processed): $FULLPATH"
+                continue
+            fi
+
+            # Debug: stampa tutto l’array PATH_HASH_SEEN    ---->> Questo array contiene SOLO le chiavi dei filename normalizzati
+            for key in "${!PATH_HASH_SEEN[@]}"; do
+                log_debug "Chiave: $key → Valore: ${PATH_HASH_SEEN[$key]}"
+            done
+
             handle_file "$FULLPATH" "$RELATIVE_PATH"
         fi
     done < <(inotifywait -m -r -e close_write,moved_to --format '%w%f:::%e' "$LOCAL_DIR")
@@ -633,7 +700,7 @@ main_loop() {
 }
 
 # === Signal Handlers ===
-trap 'log_error "Unhandled error at line $LINENO: command \`$BASH_COMMAFND\` exited with $?"; send_error_mail' ERR
+trap 'log_error "Unhandled error at line $LINENO: command \`$BASH_COMMAND\` exited with $?"; send_error_mail' ERR
 trap 'log_info "instant-remote-storage exited at $(date "+%Y-%m-%d %H:%M:%S")"' EXIT
 # Clean up entire lockdir when script exits (even with Ctrl+C)
 trap 'rm -rf "$LOCKDIR"' EXIT
