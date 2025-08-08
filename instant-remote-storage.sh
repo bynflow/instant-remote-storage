@@ -132,6 +132,12 @@ LOCKDIR="$(mktemp -d /tmp/irs-locks.XXXXXX)"    # ← LUCCHETTO intero ciclo (+ 
 
 declare -A PATH_HASH_SEEN=()    # Traccia path LOCALE + nome + hash → deduplica effettiva
 path_hash_key=""
+
+declare -A FILENAME_TRANSFORM_MAP=()
+original_pair=""
+transformed_pair=""
+
+
 declare -A FINAL_SEEN=()        # Traccia path REMOTO + nome + hash → skip upload
 
 # === MIME to extension map (placeholder) ===
@@ -375,6 +381,25 @@ compute_hash() {
     sha256sum "$1" 2>/dev/null | awk '{print $1}'
 }
 
+trim() {
+    sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
+}
+
+# Controlla se un file con RELATIVE_PATH e FILE_HASH deve essere skippato
+# restituendo 0 = deve essere skippato, 1 = può proseguire
+should_skip_due_to_transform_map() {
+    local original_pair="$1"
+
+    log_debug "🔍 [should_skip_due_to_transform_map] Original pair ricevuto: $original_pair"
+
+    if [[ -n "${FILENAME_TRANSFORM_MAP[$original_pair]:-}" ]]; then
+        log_warning "🚫 File già elaborato con nome valido ($original_pair), skippato"
+        return 0
+    fi
+
+    return 1  # altrimenti va processato
+}
+
 handle_file() {
     local local_file="$1"   # path assoluto
     local filename="$2"     # path relativo + nome_file OPPURE solo filename se file in radice
@@ -464,8 +489,10 @@ handle_file() {
     assign_exit_code=$(printf '%s' "$assign_output" | sed -n 's/.*___EXIT:\([0-9]\+\)/\1/p')
     assign_output=$(printf '%s' "$assign_output" | sed 's/___EXIT:.*//')    # Output del filename ancora eventualmente malformato ma con estensione assegnata
     
+    # Old
+    # new_filename=$(printf "%s" "$assign_output" | xargs)
 
-    new_filename=$(printf "%s" "$assign_output" | xargs)
+    new_filename=$(printf '%s\n' "$assign_output" | trim)
 
     log_debug "🔎 assign_exit_code = $assign_exit_code"
     log_debug "🧪 assign_output = '$assign_output'"
@@ -524,6 +551,12 @@ handle_file() {
                 # === Seconda verifica duplicati, dopo eventuale rinomina ===
                 # local path_hash_key
                 path_hash_key="${hash}___${filename}" # Hash + filename nuovo ---------->> questo sistema è qui perché qui si crea il MOVE_TO e non se il file non venisse rinominato
+
+                transformed_pair="${hash}___${filename}"
+                # 🔗 Registra la trasformazione: filename rinominato → filename originale
+                # Serve per evitare loop se lo stesso file (rinominato) viene rimosso e poi reimmesso con nome originale
+                FILENAME_TRANSFORM_MAP["$transformed_pair"]="$original_pair"
+
                 if [[ -n "${PATH_HASH_SEEN[$path_hash_key]:-}" ]]; then # ← Traccia LOCALE
                     log_debug "🟡 Already handled after rename: $path_hash_key"
                     EXIT_REASON="SKIP"
@@ -554,7 +587,7 @@ handle_file() {
         fi
 
         remote_path="$REMOTE_DIR/$filename" # Qui abbiamo il remote_path di inizio funzione se il filename normalizzato è identico a quello originario, altrimenti abbiamo col nuovo filename
-        log_debug "'filename' FUORI 'if [[ save_filename != basename filename) ]]' (cioè i 2 termini sono uguali) - al rigo 555: $filename"
+        log_debug "'filename' al rigo 555: $filename"
 
     fi
 
@@ -572,7 +605,7 @@ handle_file() {
         COUNT=1
         BASE="${BASE//:/}"
         EXT="${EXT//:/}"
-        NEW_NAME="${BASE}-(copia).${EXT}"
+        NEW_NAME="${BASE}-(copia).${EXT}"   # La rinomina del filename se non erro non è un 'mv' quindi è solo la rinomina della variabile
 
         while rclone lsf "$REMOTE_DIR/$NEW_NAME" &>/dev/null || [[ -f "$LOCAL_DIR/$NEW_NAME" ]]; do
             COUNT=$((COUNT + 1))
@@ -592,15 +625,41 @@ handle_file() {
         fi
         FINAL_SEEN["$final_key"]=1
 
-        if ! rclone copyto "$local_file" "$new_remote_path"; then
-            log_error "⚠️ Conflict upload failed: '$filename' → '$NEW_NAME'"
-            if ! send_error_mail; then
-                log_warning "❗ send_error_mail failed or unavailable"
-            fi
-            EXIT_REASON="ERR"
-            return 1
+        # Old
+        # if ! rclone copyto "$local_file" "$new_remote_path"; then
+        #     log_error "⚠️ Conflict upload failed: '$filename' → '$NEW_NAME'"
+        #     if ! send_error_mail; then
+        #         log_warning "❗ send_error_mail failed or unavailable"
+        #     fi
+        #     EXIT_REASON="ERR"
+        #     return 1
+        # fi
+        # log_info "📤 Conflict upload completed: '$filename' → '$NEW_NAME'"
+        log_info "🚚 Inizio upload con progress (CON conflitto): '$filename' → '$NEW_NAME'"
+
+        TMP_LOG=$(mktemp)
+
+        rclone copyto "$local_file" "$new_remote_path" --progress --stats=5s 1>"$TMP_LOG" 2>&1
+        EXIT_CODE=$?
+
+        grep "Transferred:" "$TMP_LOG" | while read -r line; do
+        logger -t "$LOG_TAG" "$line"
+        done
+
+        rm -f "$TMP_LOG"
+
+        if [[ $EXIT_CODE -ne 0 ]]; then
+        log_error "⚠️ Conflict upload failed: '$filename' → '$NEW_NAME'"
+        if ! send_error_mail; then
+            log_warning "❗ send_error_mail failed or unavailable"
         fi
-        log_info "📤 Conflict upload completed: '$filename' → '$NEW_NAME'"
+        EXIT_REASON="ERR"
+        return 1
+        fi
+
+        log_info "📤 Conflict upload completed: '$filename' → '$NEW_NAME' (con monitoraggio progressivo)"
+
+
         # File protetto da modifiche locali - per riportare un file alla scrivibilità locale → 'chmod u+w nomefile' ↓
         # la modifica di un file può poratare a comportamenti imprevedibili tipo duplicazioni inattese, apportare
         # per tanto modifiche soltanto fuori dalla cartella $LOCAL_DIR
@@ -622,16 +681,42 @@ handle_file() {
         FINAL_SEEN["$final_key"]=1
 
         # Nessun conflitto → upload normale
-        if ! rclone copyto "$local_file" "$remote_path"; then   # local_file → path assoluto più nome originario o sanitizzato - remote_path → path remoto assoluto più nome originario o sanitizzato
-            log_error "❌ Upload failed: '$filename'"
-            if ! send_error_mail; then
-                log_warning "❗ send_error_mail failed or unavailable"
-            fi
-            cleanup_lock
-            EXIT_REASON="ERR"
-            return 1
+        log_info "🚚 Inizio upload con progress (SENZA conflitto): '$filename'"
+
+        TMP_LOG=$(mktemp)
+
+        rclone copyto "$local_file" "$remote_path" --progress --stats=5s 1>"$TMP_LOG" 2>&1
+        EXIT_CODE=$?
+
+        grep "Transferred:" "$TMP_LOG" | while read -r line; do
+        logger -t "$LOG_TAG" "$line"
+        done
+
+        rm -f "$TMP_LOG"
+
+        if [[ $EXIT_CODE -ne 0 ]]; then
+        log_error "❌ Upload failed: '$filename'"
+        if ! send_error_mail; then
+            log_warning "❗ send_error_mail failed or unavailable"
         fi
-        log_info "✅ Upload completed: '$filename'"
+        cleanup_lock
+        EXIT_REASON="ERR"
+        return 1
+        fi
+
+        log_info "✅ Upload completed: '$filename' (con monitoraggio progressivo)"
+
+        # Old
+        # if ! rclone copyto "$local_file" "$remote_path"; then   # local_file → path assoluto più nome originario o sanitizzato - remote_path → path remoto assoluto più nome originario o sanitizzato
+        #     log_error "❌ Upload failed: '$filename'"
+        #     if ! send_error_mail; then
+        #         log_warning "❗ send_error_mail failed or unavailable"
+        #     fi
+        #     cleanup_lock
+        #     EXIT_REASON="ERR"
+        #     return 1
+        # fi
+        # log_info "✅ Upload completed: '$filename'"
         # File protetto da modifiche locali - per riportare un file alla scrivibilità locale → 'chmod u+w nomefile' ↓
         # la modifica di un file può poratare a comportamenti imprevedibili tipo duplicazioni inattese, apportare
         # per tanto modifiche soltanto fuori dalla cartella $LOCAL_DIR
@@ -695,6 +780,11 @@ main_loop() {
             fi
 
             path_hash_key="${FILE_HASH}___${RELATIVE_PATH}"
+            original_pair="${FILE_HASH}___${RELATIVE_PATH}"
+            if should_skip_due_to_transform_map "$original_pair"; then
+                continue
+            fi
+
             log_debug "RIGO 680 - path_hash_key → $path_hash_key"
 
             if [[ -n "${PATH_HASH_SEEN[$path_hash_key]:-}" ]]; then
@@ -702,6 +792,7 @@ main_loop() {
                 log_warning "📛 Skipped early in main_loop (already processed): $FULLPATH"
                 continue
             fi
+
 
             # Debug: stampa tutto l’array PATH_HASH_SEEN    ---->> Questo array contiene SOLO le chiavi dei filename normalizzati
             for key in "${!PATH_HASH_SEEN[@]}"; do
