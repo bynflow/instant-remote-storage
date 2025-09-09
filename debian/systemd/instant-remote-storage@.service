@@ -1,0 +1,17 @@
+[Unit]
+Description=Instant Remote Storage watcher for %i (rclone + recovery)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=%i
+EnvironmentFile=-/etc/instant-remote-storage/irs.env
+ExecStart=/usr/bin/instant-remote-storage
+Restart=on-failure
+RestartSec=5s
+SyslogIdentifier=irs-core
+
+[Install]
+WantedBy=multi-user.target
+

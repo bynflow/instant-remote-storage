@@ -1,0 +1,5 @@
+* text=auto eol=lf
+
+# Keep shell scripts executable
+*.sh text eol=lf
+debian/* text eol=lf

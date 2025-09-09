@@ -1,0 +1,30 @@
+instant-remote-storage (3.0.0-13) unstable; urgency=medium
+
+  * Initial upload to Debian. (Closes: #1114689)
+  * Packaging cleanups suggested by mentors:
+    - Improve short/long descriptions in debian/control.
+    - Ensure maintainer email is consistent across files.
+  * Bump Standards-Version to 4.7.2. No changes needed.
+
+ -- Carlo Capobianchi <bynrflow@gmail.com>  Mon, 08 Sep 2025 23:10:00 +0200
+
+instant-remote-storage (3.0.0-12) unstable; urgency=medium
+
+  * Packaging cleanups:
+    - Fix changelog trailers (+0200); no code changes.
+    - Declare runtime Depends (rclone, inotify-tools, file);
+      move xdg-utils to Recommends.
+
+ -- Carlo Capobianchi <bynrflow@gmail.com>  Sun, 07 Sep 2025 23:34:16 +0200
+
+instant-remote-storage (3.0.0-10) unstable; urgency=medium
+
+  * Standards-Version: 4.6.2 (no changes needed).
+
+ -- Carlo Capobianchi <bynrflow@gmail.com>  Fri, 05 Sep 2025 02:24:25 +0200
+
+instant-remote-storage (3.0.0-3) unstable; urgency=medium
+
+  * debian/watch placeholder; Lintian cleanups (whitespace, VCS files).
+
+ -- Carlo Capobianchi <bynrflow@gmail.com>  Thu, 04 Sep 2025 22:16:15 +0200

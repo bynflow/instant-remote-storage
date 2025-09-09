@@ -1,0 +1,117 @@
+# mime_map.sh — MIME to extension map (sourced by instant-remote-storage.sh)
+# Keys are canonical MIME types; values are lowercase extensions without the dot.
+
+declare -A MIME_EXTENSIONS=(
+  # Text
+  ["text/plain"]="txt"
+  ["text/html"]="html"
+  ["text/css"]="css"
+  ["text/csv"]="csv"
+  ["text/markdown"]="md"
+  ["application/x-bittorrent"]="torrent"
+
+  # Images
+  ["image/jpeg"]="jpg"
+  ["image/pjpeg"]="jpg"
+  ["image/png"]="png"
+  ["image/gif"]="gif"
+  ["image/webp"]="webp"
+  ["image/svg+xml"]="svg"
+  ["image/tiff"]="tiff"
+  ["image/bmp"]="bmp"
+  ["image/x-icon"]="ico"
+  ["image/vnd.microsoft.icon"]="ico"
+  ["image/heif"]="heif"
+  ["image/heic"]="heic"
+  ["image/avif"]="avif"
+
+  # Audio
+  ["audio/mpeg"]="mp3"
+  ["audio/mp3"]="mp3"
+  ["audio/mpeg3"]="mp3"
+  ["audio/wav"]="wav"
+  ["audio/vnd.wav"]="wav"
+  ["audio/vnd.wave"]="wav"
+  ["audio/wave"]="wav"
+  ["audio/x-pn-wav"]="wav"
+  ["audio/x-wav"]="wav"
+  ["audio/ogg"]="ogg"
+  ["application/ogg"]="ogg"
+  ["audio/opus"]="opus"
+  ["audio/webm"]="weba"
+  ["audio/flac"]="flac"
+  ["audio/x-flac"]="flac"
+  ["audio/aac"]="aac"
+  ["audio/mp4"]="m4a"
+  ["audio/x-m4a"]="m4a"
+  ["audio/3gpp"]="3gp"
+  ["audio/3gpp2"]="3g2"
+  ["audio/amr"]="amr"
+  ["audio/x-ms-wma"]="wma"
+
+  # Video
+  ["video/mp4"]="mp4"
+  ["video/x-msvideo"]="avi"
+  ["video/x-matroska"]="mkv"
+  ["video/webm"]="webm"
+  ["video/ogg"]="ogv"
+  ["video/quicktime"]="mov"
+  ["video/3gpp"]="3gp"
+  ["video/3gpp2"]="3g2"
+  ["video/x-flv"]="flv"
+  ["video/mpeg"]="mpeg"
+  ["video/x-ms-wmv"]="wmv"
+
+  # PDF & Documents
+  ["application/pdf"]="pdf"
+  ["application/msword"]="doc"
+  ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"]="docx"
+  ["application/vnd.ms-excel"]="xls"
+  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]="xlsx"
+  ["application/vnd.ms-powerpoint"]="ppt"
+  ["application/vnd.openxmlformats-officedocument.presentationml.presentation"]="pptx"
+  ["application/rtf"]="rtf"
+  ["text/richtext"]="rtf"
+  ["application/vnd.oasis.opendocument.text"]="odt"
+  ["application/vnd.oasis.opendocument.spreadsheet"]="ods"
+  ["application/vnd.oasis.opendocument.presentation"]="odp"
+
+  # Archives & Packages
+  ["application/zip"]="zip"
+  ["application/x-7z-compressed"]="7z"
+  ["application/x-rar-compressed"]="rar"
+  ["application/vnd.rar"]="rar"
+  ["application/gzip"]="gz"
+  ["application/x-bzip2"]="bz2"
+  ["application/x-xz"]="xz"
+  ["application/x-zstd"]="zst"
+  ["application/x-lz4"]="lz4"
+  ["application/x-brotli"]="br"
+  ["application/x-tar"]="tar"
+
+  # Code / Data
+  ["application/json"]="json"
+  ["application/xml"]="xml"
+  ["application/x-yaml"]="yaml"
+  ["application/javascript"]="js"
+  ["application/x-sh"]="sh"
+  ["application/x-shellscript"]="sh"
+  ["text/x-shellscript"]="sh"
+  ["application/x-python-code"]="py"
+  ["text/x-python"]="py"
+  ["application/java-archive"]="jar"
+  ["application/x-java-archive"]="jar"
+  ["application/x-httpd-php"]="php"
+  ["text/x-php"]="php"
+  ["text/x-csrc"]="c"
+  ["text/x-c++src"]="cpp"
+
+  # Fonts
+  ["font/ttf"]="ttf"
+  ["font/otf"]="otf"
+  ["application/font-woff"]="woff"
+  ["application/font-woff2"]="woff2"
+
+  # Other
+  ["application/octet-stream"]="bin"
+)

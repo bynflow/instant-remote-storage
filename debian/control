@@ -1,0 +1,34 @@
+Source: instant-remote-storage
+Section: utils
+Priority: optional
+Maintainer: Carlo Capobianchi <bynrflow@gmail.com>
+Build-Depends:
+ debhelper-compat (= 13),
+Standards-Version: 4.6.2
+Homepage: https://github.com/bynflow/instant-remote-storage
+Vcs-Git: https://github.com/bynflow/instant-remote-storage.git
+Vcs-Browser: https://github.com/bynflow/instant-remote-storage
+Rules-Requires-Root: no
+
+Package: instant-remote-storage
+Architecture: all
+Depends:
+ file,
+ inotify-tools,
+ rclone,
+ ${misc:Depends},
+Recommends:
+ xdg-utils,
+Suggests:
+ bzip2,
+ lz4,
+ msmtp,
+ msmtp-mta,
+ xz-utils,
+ zstd,
+Description: Directory watcher uploading to remote storage via rclone
+ This tool watches a local directory and mirrors files to any rclone
+ backend (tested with WebDAV/Nextcloud). It normalizes filenames and
+ extensions from MIME type, treats renames as remote moves, and uses a
+ crash-safe two-phase upload with recovery. Includes a templated systemd
+ unit, a wrapper and a setup helper.

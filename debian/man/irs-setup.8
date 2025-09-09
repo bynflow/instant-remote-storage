@@ -1,0 +1,19 @@
+.TH IRS-SETUP 8 "September 2025" "instant-remote-storage 3.0.0" "System Administration"
+.SH NAME
+irs-setup \- helper to configure and enable instant-remote-storage service
+.SH SYNOPSIS
+.B irs-setup
+\-u USER \-l LOCAL_DIR \-r REMOTE_DIR [\-\-enable] [\-\-start]
+.SH DESCRIPTION
+Writes /etc/instant-remote-storage/irs.env, prepares directories, and optionally
+enables/starts the systemd unit instant-remote-storage@USER.service.
+.SH EXAMPLES
+irs-setup -u alice -l /home/alice/remote-storage -r myremote:bucket/path --enable --start
+.SH FILES
+/etc/instant-remote-storage/irs.env
+.SH SEE ALSO
+.BR instant-remote-storage (1),
+.BR systemd (1)
+.SH AUTHOR
+Carlo Capobianchi <bynrflow@gmail.com>
+

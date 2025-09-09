@@ -1,0 +1,56 @@
+*.orig.tar.*
+
+# Editors / OS
+*.swp
+*~
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Python/Node accidental
+node_modules/
+dist/
+venv/
+.env
+.env.*
+
+# Build artefacts (Debian & dpkg/apt)
+*.deb
+*.ddeb
+*.buildinfo
+*.changes
+*.dsc
+*.tar.gz
+*.tar.xz
+debian/.debhelper/
+debian/*debhelper*
+debian/debhelper-build-stamp
+debian/files
+debian/tmp/
+debian/*/DEBIAN/
+debian/*/usr/share/doc/*/changelog.Debian.gz
+debian/*.substvars
+debian/instant-remote-storage/
+!debian/changelog
+!debian/control
+!debian/copyright
+!debian/rules
+!debian/source/
+!debian/watch
+!debian/man/
+!debian/systemd/
+!debian/docs/
+
+# Quilt work dir (se in futuro usi patch/series)
+.pc/
+
+# rclone leftovers
+rclone.conf
+
+# Altri backup comuni (opzionali)
+*.bak
+*.orig
+*.rej
+#*#
+

@@ -1,0 +1,3 @@
+version=4
+# Upstream tarballs are not yet published at a stable URL.
+# A proper watch stanza will be added once releases are public.

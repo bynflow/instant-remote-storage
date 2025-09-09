@@ -1,0 +1,19 @@
+instant-remote-storage for Debian
+---------------------------------
+
+Configuration:
+  Global defaults live in /etc/instant-remote-storage/irs.env
+  Typical variables:
+    LOCAL_DIR=/home/USER/remote-storage
+    REMOTE_DIR=rclone-remote:bucket/path
+
+Quick setup:
+  sudo irs-setup -u $USER -l /home/$USER/remote-storage -r myremote:bucket/path --enable --start
+
+Service:
+  The systemd unit is templated as instant-remote-storage@.service (system-wide).
+  Logs go to journald (journalctl -u instant-remote-storage@USER -f -o cat).
+
+Security:
+  This tool relies on rclone configuration. Manage credentials via `rclone config`.
+

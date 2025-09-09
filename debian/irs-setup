@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "Usage: irs-setup -u USER -l LOCAL_DIR -r REMOTE_DIR [--enable] [--start]"
+  echo "  Example: irs-setup -u alice -l /home/alice/remote-storage -r myremote:bucket/path --enable --start"
+}
+
+USER_NAME=""
+LOCAL_DIR=""
+REMOTE_DIR=""
+ENABLE=0
+START=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -u) USER_NAME="$2"; shift 2;;
+    -l) LOCAL_DIR="$2"; shift 2;;
+    -r) REMOTE_DIR="$2"; shift 2;;
+    --enable) ENABLE=1; shift;;
+    --start) START=1; shift;;
+    -h|--help) usage; exit 0;;
+    *) echo "Unknown arg: $1"; usage; exit 2;;
+  esac
+done
+
+[ -n "$USER_NAME" ] || { echo "Missing -u USER"; usage; exit 2; }
+[ -n "$LOCAL_DIR" ] || { echo "Missing -l LOCAL_DIR"; usage; exit 2; }
+[ -n "$REMOTE_DIR" ] || { echo "Missing -r REMOTE_DIR"; usage; exit 2; }
+
+mkdir -p /etc/instant-remote-storage
+cat > /etc/instant-remote-storage/irs.env <<EOC
+# Instant Remote Storage configuration
+LOCAL_DIR="$LOCAL_DIR"
+REMOTE_DIR="$REMOTE_DIR"
+# Optional state dir (default is user home in runtime); override if needed:
+# STATE_DIR="/var/lib/instant-remote-storage/${USER_NAME}"
+EOC
+chmod 0644 /etc/instant-remote-storage/irs.env
+
+# Ensure local dir exists
+install -d -o "$USER_NAME" -g "$USER_NAME" "$LOCAL_DIR"
+
+# Reload systemd and optionally enable/start
+systemctl daemon-reload
+if [ "$ENABLE" -eq 1 ]; then
+  systemctl enable "instant-remote-storage@${USER_NAME}.service"
+fi
+if [ "$START" -eq 1 ]; then
+  systemctl restart "instant-remote-storage@${USER_NAME}.service" || \
+  systemctl start "instant-remote-storage@${USER_NAME}.service"
+fi
+
+echo "Configured. Edit /etc/instant-remote-storage/irs.env to adjust settings."
+

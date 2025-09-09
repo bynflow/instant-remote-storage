@@ -1,0 +1,24 @@
+[Unit]
+Description=Instant Remote Storage (system-wide) for user %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+Group=%i
+ExecStart=/usr/lib/instant-remote-storage/instant-remote-storage.sh
+WorkingDirectory=/usr/lib/instant-remote-storage
+Environment=HOME=/home/%i
+Restart=on-failure
+RestartSec=10s
+SuccessExitStatus=130
+StartLimitIntervalSec=60
+StartLimitBurst=5
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+

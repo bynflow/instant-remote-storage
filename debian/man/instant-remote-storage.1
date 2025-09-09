@@ -1,0 +1,17 @@
+.TH INSTANT-REMOTE-STORAGE 1 "September 2025" "instant-remote-storage 3.0.0" "User Commands"
+.SH NAME
+instant-remote-storage \- watch a local directory and upload files to a remote via rclone
+.SH SYNOPSIS
+.B instant-remote-storage
+.SH DESCRIPTION
+Watches a local directory and mirrors files to a remote using rclone, with
+MIME-based filename normalization and a crash-safe two-phase upload.
+Configuration is taken from /etc/instant-remote-storage/irs.env.
+.SH FILES
+/etc/instant-remote-storage/irs.env
+.SH SEE ALSO
+.BR rclone (1),
+.BR systemd (1)
+.SH AUTHOR
+Carlo Capobianchi <bynrflow@gmail.com>
+

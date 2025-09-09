@@ -1,0 +1,4 @@
+#!/bin/sh
+# Simple wrapper to launch the program from /usr/lib
+exec /usr/lib/instant-remote-storage/instant-remote-storage.sh "$@"
+

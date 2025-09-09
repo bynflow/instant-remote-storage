@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+# Interactive setup for instant-remote-storage (Debian-based).
+# - Installs missing core deps (optional, with sudo)
+# - Optionally installs and configures msmtp for email error reports
+# - Writes ~/.env and ~/.msmtprc
+# - Enables and starts the per-user systemd service, offers lingering
+
+set -Eeuo pipefail
+
+info(){ echo "[INFO]  $*"; }
+warn(){ echo "[WARN]  $*"; }
+err(){  echo "[ERROR] $*" >&2; }
+ask_yn(){ # ask_yn "Question?" "default_no|default_yes"
+  local q="$1" def="${2:-default_no}" ans
+  case "$def" in
+    default_yes) read -rp "$q [Y/n] " ans; [[ "${ans:-Y}" =~ ^[Yy]$ ]] ;;
+    *)           read -rp "$q [y/N] " ans; [[ "${ans:-N}" =~ ^[Yy]$ ]] ;;
+  esac
+}
+
+need_cmd() { command -v "$1" >/dev/null 2>&1; }
+
+require_sudo() {
+  if ! need_cmd sudo; then err "sudo is required to install packages."; exit 1; fi
+}
+
+DISTRO="debian"
+if ! need_cmd apt; then
+  warn "This wizard targets Debian/Ubuntu/LMDE (apt not found). Continuing, but package installs may fail."
+  DISTRO="unknown"
+fi
+
+# --- Core dependencies --------------------------------------------------------
+CORE_PKGS=(bash coreutils inotify-tools rclone file util-linux xdg-utils)
+MISSING_CORE=()
+for c in bash rclone inotifywait sha256sum stat xdg-mime file awk sed grep find logger systemctl loginctl; do
+  need_cmd "$c" || MISSING_CORE+=("$c")
+done
+
+if ((${#MISSING_CORE[@]})); then
+  echo
+  warn "Missing commands: ${MISSING_CORE[*]}"
+  if [[ "$DISTRO" == "debian" ]] && ask_yn "Install required packages now with sudo apt?" "default_yes"; then
+    require_sudo
+    sudo apt update
+    sudo apt install -y "${CORE_PKGS[@]}"
+  else
+    err "Please install required packages and rerun."; exit 1
+  fi
+fi
+
+# --- Collect main config (LOCAL_DIR, REMOTE_DIR, readonly) -------------------
+USER_HOME="${HOME}"
+ENV_FILE="${USER_HOME}/.env"
+
+DEFAULT_LOCAL="${LOCAL_DIR:-$USER_HOME/your-remote-storage}"
+DEFAULT_REMOTE="${REMOTE_DIR:-hetzner-nc:your-remote-directory}"
+DEFAULT_READONLY="${IRS_MAKE_READONLY:-1}"
+
+echo
+info "Configuring instant-remote-storage for user: $USER"
+read -rp "Local directory to watch [$DEFAULT_LOCAL]: " ans
+LOCAL_DIR="${ans:-$DEFAULT_LOCAL}"
+
+read -rp "Remote rclone target (e.g., hetzner-nc:desktop/instant-storage) [$DEFAULT_REMOTE]: " ans
+REMOTE_DIR="${ans:-$DEFAULT_REMOTE}"
+
+read -rp "Make local files read-only after upload? (1 yes, 0 no) [$DEFAULT_READONLY]: " ans
+IRS_MAKE_READONLY="${ans:-$DEFAULT_READONLY}"
+
+STATE_DIR="${STATE_DIR:-$USER_HOME/.local/state/instant-remote-storage}"
+INFLIGHT_DIR="${INFLIGHT_DIR:-$STATE_DIR/inflight}"
+REMOTE_TMP_DIR="${REMOTE_DIR}/.irs-tmp"
+
+echo
+info "Ensuring local directories exist…"
+mkdir -p -- "$LOCAL_DIR" "$INFLIGHT_DIR"
+
+# Best-effort remote tmp dir
+if rclone mkdir "$REMOTE_TMP_DIR" >/dev/null 2>&1; then
+  info "Remote reachable; prepared: $REMOTE_TMP_DIR"
+else
+  warn "Could not create $REMOTE_TMP_DIR (network down or remote not yet configured?). Continuing."
+fi
+
+touch "$ENV_FILE"
+_upsert_env() {
+  local key="$1" val="$2"
+  if grep -qE "^${key}=" "$ENV_FILE"; then
+    sed -i "s|^${key}=.*|${key}=\"${val}\"|" "$ENV_FILE"
+  else
+    printf '%s="%s"\n' "$key" "$val" >> "$ENV_FILE"
+  fi
+}
+
+_upsert_env "LOCAL_DIR" "$LOCAL_DIR"
+_upsert_env "REMOTE_DIR" "$REMOTE_DIR"
+_upsert_env "IRS_MAKE_READONLY" "$IRS_MAKE_READONLY"
+_upsert_env "STATE_DIR" "$STATE_DIR"
+_upsert_env "INFLIGHT_DIR" "$INFLIGHT_DIR"
+_upsert_env "REMOTE_TMP_DIR" "$REMOTE_TMP_DIR"
+
+# --- Optional: msmtp install & email config ----------------------------------
+configure_email() {
+  echo
+  info "Email alerts: configure msmtp for error reports"
+
+  if ! need_cmd msmtp; then
+    if [[ "$DISTRO" == "debian" ]] && ask_yn "Install msmtp-mta with sudo apt?" "default_yes"; then
+      require_sudo
+      sudo apt update
+      sudo apt install -y msmtp-mta ca-certificates
+    else
+      warn "Skipping email setup (msmtp not installed)."
+      return 0
+    fi
+  fi
+
+  echo
+  echo "Choose provider:"
+  echo "  1) Gmail (requires App Password)"
+  echo "  2) Outlook / Office365"
+  echo "  3) Custom SMTP"
+  echo "  4) Skip"
+  read -rp "Selection [1-4]: " sel
+  case "${sel:-4}" in
+    1) PROV="gmail"   ; HOST="smtp.gmail.com"      ; PORT="587" ; TLS="on" ; STARTTLS="on" ;;
+    2) PROV="outlook" ; HOST="smtp.office365.com"  ; PORT="587" ; TLS="on" ; STARTTLS="on" ;;
+    3) PROV="custom"  ; HOST="" ; PORT="" ; TLS="on" ; STARTTLS="on" ;;
+    *) warn "Skipping email setup."; return 0 ;;
+  esac
+
+  read -rp "From email address (e.g., you@example.com): " FROM_ADDR
+  read -rp "Display From name (optional, default: instant-remote-storage): " FROM_NAME
+  FROM_NAME="${FROM_NAME:-instant-remote-storage}"
+  read -rp "Recipient for error reports (EMAIL_TO): " EMAIL_TO
+
+  if [[ "$PROV" == "custom" ]]; then
+    read -rp "SMTP host (e.g., smtp.example.com): " HOST
+    read -rp "SMTP port (e.g., 587): " PORT
+    read -rp "SMTP username: " SMTP_USER
+    read -rsp "SMTP password (will be stored in ~/.msmtprc, consider an app password): " SMTP_PASS; echo
+  else
+    SMTP_USER="$FROM_ADDR"
+    if [[ "$PROV" == "gmail" ]]; then
+      echo "NOTE: Gmail requires a 16-digit App Password (not your normal password)."
+    fi
+    read -rsp "SMTP password (use an App Password if available): " SMTP_PASS; echo
+  fi
+
+  MSMTP_ACCOUNT="$PROV"
+  EMAIL_FROM="${FROM_NAME} <${FROM_ADDR}>"
+
+  MSRC="${HOME}/.msmtprc"
+  cat > "$MSRC" <<EOF
+# Auto-generated by irs-setup
+defaults
+auth           on
+tls            ${TLS}
+tls_starttls   ${STARTTLS}
+tls_trust_file /etc/ssl/certs/ca-certificates.crt
+logfile        ${HOME}/.msmtp.log
+
+account ${MSMTP_ACCOUNT}
+host ${HOST}
+port ${PORT}
+from ${FROM_ADDR}
+user ${SMTP_USER}
+password ${SMTP_PASS}
+
+account default : ${MSMTP_ACCOUNT}
+EOF
+  chmod 600 "$MSRC"
+  info "Wrote $MSRC (mode 600)."
+
+  # Save to ~/.env for the main script
+  _upsert_env "MSMTP_ACCOUNT" "$MSMTP_ACCOUNT"
+  _upsert_env "EMAIL_FROM"    "$EMAIL_FROM"
+  _upsert_env "EMAIL_TO"      "$EMAIL_TO"
+
+  # Test email
+  echo
+  info "Sending a test email to ${EMAIL_TO}…"
+  {
+    echo "To: ${EMAIL_TO}"
+    echo "Subject: instant-remote-storage test ($(date -Is))"
+    echo "From: ${EMAIL_FROM}"
+    echo
+    echo "This is a test email from irs-setup."
+  } | msmtp --from="$MSMTP_ACCOUNT" -t && info "Test email sent." || warn "Test email failed."
+}
+
+if ask_yn "Configure email error reports now?" "default_yes"; then
+  configure_email
+else
+  warn "Email alerts not configured. You can rerun 'irs-setup' later."
+fi
+
+echo
+info "Saved config to $ENV_FILE:"
+grep -E '^(LOCAL_DIR|REMOTE_DIR|IRS_MAKE_READONLY|STATE_DIR|INFLIGHT_DIR|REMOTE_TMP_DIR|EMAIL_|MSMTP_ACCOUNT)=' "$ENV_FILE" || true
+
+# --- Enable + start service; offer lingering ---------------------------------
+info "Reloading user units…"
+systemctl --user daemon-reload
+
+UNIT="instant-remote-storage@${USER}.service"
+if systemctl --user enable --now "$UNIT"; then
+  info "Service enabled and started: $UNIT"
+else
+  err "Failed to enable/start $UNIT (no user session?)."
+fi
+
+linger_state="$(loginctl show-user "$USER" 2>/dev/null | awk -F= '/Linger=/{print $2}')"
+if [[ "${linger_state:-no}" != "yes" ]] && ask_yn "Enable lingering so the service starts at boot without login? (requires sudo)" "default_yes"; then
+  require_sudo
+  if sudo loginctl enable-linger "$USER"; then
+    info "Lingering enabled for $USER."
+  else
+    warn "Could not enable lingering."
+  fi
+fi
+
+echo
+info "Status:"
+systemctl --user status "$UNIT" --no-pager || true
+echo
+info "Done. Put files into: $LOCAL_DIR"
+echo "Tail logs: journalctl --user -u $UNIT -f"
+

@@ -1,0 +1,19 @@
+[Unit]
+Description=Instant Remote Storage (per-user) for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/instant-remote-storage/instant-remote-storage.sh
+WorkingDirectory=/usr/lib/instant-remote-storage
+Restart=on-failure
+RestartSec=10s
+SuccessExitStatus=130
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
+
