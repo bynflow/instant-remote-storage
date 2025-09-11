@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
 # ========================================
-# instant-remote-storage - v3.0.0
+# instant-remote-storage - v3.2.0
 # Author : Carlo Capobianchi (bynflow)
 # GitHub : https://github.com/bynflow
-# Last Modified: 2025-09-04
+# Last Modified: 2025-09-11
 # ========================================
 # Watches a local directory (LOCAL_DIR) and uploads files to a remote (REMOTE_DIR)
 # using rclone. Features:
@@ -418,6 +418,12 @@ handle_file() {
     fi
   fi
   remote_path="$REMOTE_DIR/$filename"
+
+  # 4.5) Skip unchanged files (same file-id, same remote path, same hash)
+  if [[ -n "$file_id" && -n "$idx_remote" && "$idx_remote" == "$remote_path" && -n "$idx_hash" && "$idx_hash" == "$hash" ]]; then
+    log_info "Skip unchanged: '$filename' (already uploaded)";
+    EXIT_REASON="OK"; cleanup_lock; return 0
+  fi
 
   # 5) Ensure remote dir exists
   local remote_dir_path; remote_dir_path=$(dirname "$remote_path")
