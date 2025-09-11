@@ -1,3 +1,16 @@
+instant-remote-storage (3.0.0-14) unstable; urgency=medium
+
+  * Avoid duplicate re-uploads after reboot: skip files whose device+inode,
+    remote path and SHA-256 are unchanged at cold start. Preserved behavior:
+    files deleted and re-added (new inode) or with changed content are
+    uploaded again; rename detection unchanged.
+  * README.md: clarify MIME-based normalization and tested backends.
+  * CONTRIBUTING.md: add minimal contribution guidelines.
+  * LICENSE: clarify Expat (MIT) wording (no license change).
+  * No change to Standards-Version.
+
+ -- Carlo Capobianchi <bynrflow@gmail.com>  Thu, 11 Sep 2025 17:33:41 +0200
+
 instant-remote-storage (3.0.0-13) unstable; urgency=medium
 
   * Initial upload to Debian. (Closes: #1114689)

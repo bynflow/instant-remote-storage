@@ -1,0 +1,337 @@
+Description: cold-start: skip unchanged files using persistent index
+ Avoids duplicate re-uploads after reboot by skipping files whose
+ device+inode, remote path and content hash are unchanged.
+ Preserves desired behaviour: if a file is deleted and re-added (new
+ inode) or its contents change, it is uploaded again. Also keeps
+ rename-detection (remote moveto) semantics intact. Small README and
+ license wording touch-ups.
+Author: Carlo Capobianchi <bynrflow@gmail.com>
+Origin: upstream
+Forwarded: not-needed
+Last-Update: 2025-09-11
+
+--- /dev/null
++++ instant-remote-storage-3.0.0/CONTRIBUTING.md
+@@ -0,0 +1,24 @@
++# Contributing
++
++Thanks for wanting to help!
++
++## How to propose changes
++
++1. Open an issue explaining the problem/feature.
++2. Fork the repo and create a feature branch.
++3. Follow the code style (POSIX shell) and keep changes focused.
++4. Add/update docs when relevant.
++5. Open a Pull Request linked to the issue.
++
++## Testing locally
++
++- Configure an rclone remote.
++- Use a throw-away local folder and remote path.
++- Watch service logs with `journalctl -u instant-remote-storage@<user> -f`.
++
++## Reporting bugs
++
++Please include:
++- OS/distro and versions of `rclone`, `inotify-tools`, `file`
++- your `rclone config` backend type (redact secrets)
++- steps to reproduce and relevant logs
+--- instant-remote-storage-3.0.0.orig/README.md
++++ instant-remote-storage-3.0.0/README.md
+@@ -1,209 +1,95 @@
+-# instant-remote-storage
++# Instant Remote Storage
+ 
+-A robust, background uploader for Linux (Debian-based).
+-It watches a local directory and uploads files to a remote (e.g., an rclone
+-remote like `hetzner-nc:...`) with:
+-
+-* **Two-phase uploads** (copy → tmp, then server-side move → final)
+-* **Crash-safe recovery** using local in-flight markers
+-* **MIME-based extension fixing** + **safe filename cleaning**
+-* **Read-only local files** after successful upload (optional)
+-* **Conflict handling**: suffix like `"(copia)"`, `"(copia 2)"`, …
+-* **Cold-start rescan**: pick up files that were never marked in-flight
+-* **systemd user service** for auto-start and automatic restart on failure
+-* **Interactive setup** (`irs-setup`) to configure per-user settings
+-
+-> Version: **2.2.0**
+-
+----
++Directory watcher that mirrors a local folder to a remote **rclone** backend.
++It normalizes filenames by **MIME type**, detects **renames** (remote moves) and
++uses **crash-safe two-phase uploads** with automatic recovery. Ships with a
++templated **systemd** unit and a small setup helper.
++
++Tested with **WebDAV/Nextcloud**; works with any rclone backend.
++
++## Features
++
++* inotify-based watcher → fast reaction, low overhead
++* MIME-based extension normalization
++* rename detection → remote server receives `move` instead of re-upload
++* crash-safe two-phase uploads with recovery script
++* templated systemd service (`instant-remote-storage@.service`)
++* small `irs-setup` helper to create `/etc/instant-remote-storage/irs.env`
+ 
+ ## Requirements
+ 
+-* Debian/Ubuntu/LMDE (or any Debian-based distro)
+-* `bash`, `rclone`, `inotify-tools` (`inotifywait`), `file`, `xdg-utils`
+-* Standard shell tools: `awk`, `sed`, `grep`, `find`, `sha256sum`, `stat`, `logger`
+-* **Optional** (for email error reports): `msmtp-mta` (or equivalent `msmtp`)
+-
+-Check quickly:
+-
+-```bash
+-which rclone inotifywait file xdg-mime awk sed grep find sha256sum stat logger
+-```
+-
+----
+-
+-## Install
+-
+-From the project root:
+-
+-```bash
+-sudo make install
+-```
+-
+-This installs to:
+-
+-* `/usr/local/lib/instant-remote-storage/` (sources)
+-* `/usr/local/bin/instant-remote-storage` (symlink)
+-* `/usr/local/bin/irs-setup` (interactive setup)
+-* `/usr/lib/systemd/user/instant-remote-storage@.service` (user systemd unit)
+-
+-> The Makefile also has `make dist` to produce a tarball under `dist/`.
++* `rclone` (configured remote, e.g. `myremote:bucket/path` or `nextcloud:Folder`)
++* `inotify-tools`
++* `file` (for MIME detection)
++* Linux with `systemd` (for the unit)
+ 
+----
++## Quick start
+ 
+-## First-time setup (per user)
+-
+-Run as the target user:
+-
+-```bash
+-irs-setup
+-```
++1. Configure `rclone` (example for WebDAV/Nextcloud):
+ 
+-The wizard will:
++   ```bash
++   rclone config
++   # create a remote, e.g. "nextcloud" (vendor=Nextcloud, url=https://example.tld)
++   ```
+ 
+-1. Ask for your **local folder** to watch (default: `~/remote-storage`)
+-2. Ask for your **remote destination** (e.g. `hetzner-nc:your-remote-directory`)
+-3. Create/update `~/.env` accordingly
+-4. Optionally help you configure **msmtp** for error emails
+-5. Enable and start the systemd user service:
++2. Create the local/remote pair and enable the service:
+ 
+    ```bash
+-   systemctl --user enable --now instant-remote-storage@$(whoami).service
++   sudo irs-setup -u "$USER" \
++     -l "$HOME/remote-storage" \
++     -r "nextcloud:InstantRemoteStorage" \
++     --enable --start
+    ```
+ 
+-> Repeat `irs-setup` for each user who wants the service.
++3. Drop files into the local folder and watch them being mirrored.
+ 
+----
++## Configuration
+ 
+-## How it works (high level)
++Main env file (created by `irs-setup`):
+ 
+-* Watches `LOCAL_DIR` (from `~/.env`) via `inotifywait` for `create`, `close_write`, and `moved_to`.
+-* Normalizes filenames (lowercase, safe chars, keeps composite extensions like `.tar.gz`).
+-* Ensures a correct extension based on MIME (when mapped).
+-* Uploads in **two phases**:
+-
+-  1. `copyto` → `REMOTE_DIR/.irs-tmp/<hash>_<inode>.upload`
+-  2. `moveto` → final path (server-side when supported)
+-* Writes a **local marker** `~/.local/state/instant-remote-storage/inflight/<hash>_<inode>.state`
+-  before copying; recovery uses this to resume after crashes.
+-* Marks local file read-only (`chmod 444`) after successful upload (optional).
++```
++/etc/instant-remote-storage/irs.env
++```
+ 
+----
++Key variables:
+ 
+-## Configuration (via `~/.env`)
++* `LOCAL_DIR` – local watched directory
++* `REMOTE_DIR` – rclone destination (e.g. `nextcloud:InstantRemoteStorage`)
++* optional `STATE_DIR` – where to store runtime state (by default under \$HOME)
+ 
+-The main script loads `~/.env` if present. Example keys:
++## Logs
+ 
+ ```bash
+-# Mandatory for your use-case:
+-LOCAL_DIR="$HOME/remote-storage"
+-REMOTE_DIR="hetzner-nc:your-remote-directory"
+-
+-# Optional tuning:
+-IRS_MAKE_READONLY=1                   # 1 = chmod 444 after upload, 0 = leave as-is
+-DEBUG=1                               # 1 = verbose logs, 0 = quieter
+-LOG_TAG="instant-remote-storage"      # journalctl tag
+-
+-# Internal state / tmp (usually fine as-is):
+-STATE_DIR="$HOME/.local/state/instant-remote-storage"
+-INFLIGHT_DIR="$STATE_DIR/inflight"
+-REMOTE_TMP_DIR="$REMOTE_DIR/.irs-tmp"
+-IRS_TMP_TTL_SECONDS=86400
+-
+-# Optional email on errors (requires msmtp):
+-EMAIL_TO="you@example.com"
+-EMAIL_FROM="instant-remote-storage <noreply@localhost>"
+-MSMTP_ACCOUNT="default"
++journalctl -u instant-remote-storage@<user> -f
+ ```
+ 
+-> Tip: `$HOME` is more explicit/portable than `~` in `.env`.
+-
+----
+-
+-## Logs & status
+-
+-* Follow logs:
+-
+-  ```bash
+-  journalctl --user -u instant-remote-storage@$(whoami).service -f
+-  ```
+-* Check service status:
+-
+-  ```bash
+-  systemctl --user status instant-remote-storage@$(whoami).service
+-  ```
+-
+-Progress lines from `rclone` ("Transferred: …") are forwarded to the journal.
+-
+----
+-
+ ## Recovery
+ 
+-On startup the service:
+-
+-1. Ensures local state dirs and remote tmp dir.
+-2. Runs **recovery**:
+-
+-   * If final exists remotely → clears marker.
+-   * If tmp exists remotely → attempts `moveto` to final.
+-   * Otherwise → retries `copyto` then `moveto`.
+-3. Runs **cold-start rescan** for any local user-writable files that never created a marker (e.g., files copied while the service was down).
+-
+-You can safely interrupt the service (Ctrl-C or stop); partial uploads resume on next start.
+-
+----
+-
+-## Security & permissions
+-
+-* By default, successfully uploaded files are made **read-only** (`IRS_MAKE_READONLY=1`).
+-* A per-process lock prevents multiple concurrent instances per user session.
+-* Each user runs their own systemd user service (no root daemon that touches user files).
+-
+----
+-
+-## Uninstall
++If the machine reboots mid-upload, the recovery helper finalizes the two-phase
++uploads on the next start. You can also run it manually:
+ 
+ ```bash
+-# As each user (optional):
+-systemctl --user disable --now instant-remote-storage@$(whoami).service
+-
+-# Then as root:
+-sudo make uninstall
++/usr/lib/instant-remote-storage/lib/irs_recovery.sh
+ ```
+ 
+-This removes the installed files. User state dirs (`~/.local/state/...`) and `~/.env`
+-are not removed.
+-
+----
++## Packaging
+ 
+-## Troubleshooting
++* Debian source package available on mentors.
++* ITP: **#1114689**
++* Runtime Depends: `rclone`, `inotify-tools`, `file`; Recommends: `xdg-utils`.
+ 
+-* **No uploads happening**: check that `LOCAL_DIR` exists and is writable; see logs with `journalctl --user -u ...`.
+-* **Permission denied on local files**: if `IRS_MAKE_READONLY=1`, files become `444` after upload.
+-* **Remote not found**: verify your rclone remote name and credentials (`rclone config`).
+-* **“Missing command …”**: install the required package (see *Requirements*).
+-* **Conflicts**: files with same final name get `(copia)`, `(copia 2)`, etc.
++## Limitations
+ 
+----
+-
+-## FAQ
+-
+-**Q: Can multiple users run it on the same machine?**
+-Yes. Each runs `irs-setup` and gets their own systemd user service and `~/.env`.
+-
+-**Q: How do I change the remote later?**
+-Edit `~/.env` and restart:
+-
+-```bash
+-systemctl --user restart instant-remote-storage@$(whoami).service
+-```
++* MIME-based normalization relies on `file(1)`; unusual types may keep the
++  original suffix.
++* Works best with stable rclone backends (WebDAV/Nextcloud well tested).
+ 
+-**Q: Does the lock file block systemd restarts?**
+-No. The lock is per-process and is cleaned on exit. If the process crashes hard, the next start replaces it.
++## Contributing
+ 
+----
++Issues and PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+ 
+ ## License
+ 
+-See `LICENSE`.
++This project is licensed under the **Expat (MIT)** license.
++See [LICENSE](LICENSE).
+ 
+--- instant-remote-storage-3.0.0.orig/instant-remote-storage.sh
++++ instant-remote-storage-3.0.0/instant-remote-storage.sh
+@@ -1,10 +1,10 @@
+ #!/usr/bin/env bash
+ 
+ # ========================================
+-# instant-remote-storage - v3.0.0
++# instant-remote-storage - v3.2.0
+ # Author : Carlo Capobianchi (bynflow)
+ # GitHub : https://github.com/bynflow
+-# Last Modified: 2025-09-04
++# Last Modified: 2025-09-11
+ # ========================================
+ # Watches a local directory (LOCAL_DIR) and uploads files to a remote (REMOTE_DIR)
+ # using rclone. Features:
+@@ -419,6 +419,12 @@ handle_file() {
+   fi
+   remote_path="$REMOTE_DIR/$filename"
+ 
++  # 4.5) Skip unchanged files (same file-id, same remote path, same hash)
++  if [[ -n "$file_id" && -n "$idx_remote" && "$idx_remote" == "$remote_path" && -n "$idx_hash" && "$idx_hash" == "$hash" ]]; then
++    log_info "Skip unchanged: '$filename' (already uploaded)";
++    EXIT_REASON="OK"; cleanup_lock; return 0
++  fi
++
+   # 5) Ensure remote dir exists
+   local remote_dir_path; remote_dir_path=$(dirname "$remote_path")
+   rclone mkdir "$remote_dir_path" >/dev/null 2>&1 || log_warning "Cannot create remote dir: $remote_dir_path"

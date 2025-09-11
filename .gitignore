@@ -19,6 +19,7 @@ venv/
 *.deb
 *.ddeb
 *.buildinfo
+*.build
 *.changes
 *.dsc
 *.tar.gz
