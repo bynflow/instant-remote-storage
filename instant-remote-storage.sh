@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 
 # ========================================
-# instant-remote-storage - v3.2.0
+# instant-remote-storage - v3.3.0
 # Author : Carlo Capobianchi (bynflow)
 # GitHub : https://github.com/bynflow
-# Last Modified: 2025-09-11
+# Last Modified: 2025-09-12
 # ========================================
 # Watches a local directory (LOCAL_DIR) and uploads files to a remote (REMOTE_DIR)
 # using rclone. Features:
 #   - MIME-based extension normalization (via external map)
 #   - Two-phase upload with crash-safe recovery (tmp marker + promote)
 #   - Persistent index (dev:inode -> remote path, last hash) to handle:
-#       * content updates → overwrite in place (no conflict copy)
-#       * pure renames → remote renames (no reupload)
-#   - Dedup of simultaneous triggers (hash+inode lock and seen map)
+#       * unchanged files → skip forever (across reboots)
+#       * content updates → always create a copy series ("(copy)", "(copy 2)", …); never overwrite
+#       * pure renames → treated as new uploads; remote renames disabled by default
+#   - Dedup of simultaneous triggers (hash+inode lock + seen map)
 #   - Optional mirroring of empty directories only on final name (MOVED_TO)
 #   - Heuristics to detect tarballs inside compressed streams (tar.*)
+#   - Remote rename toggle: IRS_ALLOW_REMOTE_RENAME=1 re-enables server-side renames for pure renames
 # ========================================
 
 set -Eeuo pipefail
@@ -86,6 +88,9 @@ INDEX_FILE="${INDEX_FILE:-$STATE_DIR/index.tsv}"
 
 # Behavior toggles
 IRS_MIRROR_EMPTY_DIRS=${IRS_MIRROR_EMPTY_DIRS:-1}  # mirror empty dirs only on MOVED_TO
+
+# Do not rename files on the remote; treat local renames as new uploads
+IRS_ALLOW_REMOTE_RENAME=${IRS_ALLOW_REMOTE_RENAME:-0}
 
 # === Error reporting (optional msmtp) ===
 send_error_mail() {
@@ -419,10 +424,28 @@ handle_file() {
   fi
   remote_path="$REMOTE_DIR/$filename"
 
-  # 4.5) Skip unchanged files (same file-id, same remote path, same hash)
-  if [[ -n "$file_id" && -n "$idx_remote" && "$idx_remote" == "$remote_path" && -n "$idx_hash" && "$idx_hash" == "$hash" ]]; then
-    log_info "Skip unchanged: '$filename' (already uploaded)";
-    EXIT_REASON="OK"; cleanup_lock; return 0
+  # 4.5) Unchanged vs content-change (remote-first, no overwrite; rename is a change → upload)
+  if [[ -n "$file_id" && -n "$idx_remote" ]]; then
+    # Unchanged AND same computed remote path → skip forever (even across reboots)
+    if [[ -n "$idx_hash" && "$idx_hash" == "$hash" && "$idx_remote" == "$remote_path" ]]; then
+      path_hash_key="${hash}___${filename}"
+      PATH_HASH_SEEN["$path_hash_key"]="$inode"
+      log_info "Skip unchanged: '$filename'"
+      EXIT_REASON="OK"; cleanup_lock; return 0
+    fi
+
+    # Content changed → always create a new copy on the remote (never overwrite)
+    if [[ -n "$idx_hash" && "$idx_hash" != "$hash" ]]; then
+      local final_remote_copy
+      final_remote_copy="$(_next_copy_dest "$REMOTE_DIR/$filename")"
+      if ! two_phase_upload "$local_file" "$final_remote_copy" "$hash" "$inode" "conflict"; then
+        log_error "Content-change copy upload failed: '$filename'"; send_error_mail || true; EXIT_REASON="ERR"; return 1
+      fi
+      [[ -n "$file_id" ]] && update_index "$file_id" "$final_remote_copy" "$hash"
+      path_hash_key="${hash}___${filename}"
+      PATH_HASH_SEEN["$path_hash_key"]="$inode"
+      EXIT_REASON="OK"; cleanup_lock; return 0
+    fi
   fi
 
   # 5) Ensure remote dir exists
@@ -430,7 +453,7 @@ handle_file() {
   rclone mkdir "$remote_dir_path" >/dev/null 2>&1 || log_warning "Cannot create remote dir: $remote_dir_path"
 
   # 6) Handle pure rename (same file-id, same hash, different remote path)
-  if [[ -n "$file_id" && -n "$idx_remote" && "$idx_remote" != "$remote_path" && -n "$idx_hash" && "$idx_hash" == "$hash" ]]; then
+  if [[ "${IRS_ALLOW_REMOTE_RENAME:-0}" == "1" && -n "$file_id" && -n "$idx_remote" && "$idx_remote" != "$remote_path" && -n "$idx_hash" && "$idx_hash" == "$hash" ]]; then
     log_info "Detected pure rename: '$idx_remote' -> '$remote_path' (no reupload)"
     ensure_remote_dir "$(dirname "$remote_path")" || true
     if rclone moveto "$idx_remote" "$remote_path" >/dev/null 2>&1; then
@@ -504,7 +527,8 @@ cold_start_rescan() {
     local relfile inode; relfile="${f#"$LOCAL_DIR"/}"; inode=$(get_inode "$f"); [[ -z "$inode" ]] && continue
     log_debug "Cold-start: requeue $relfile"
     handle_file "$f" "$relfile" "$inode" || log_warning "Cold-start failed on $relfile"
-  done < <(find "$LOCAL_DIR" -type f -perm -u+w -not -path '*/.*' -print0)
+    # Include all files (also read-only) at cold start
+  done < <(find "$LOCAL_DIR" -type f -not -path '*/.*' -print0)
 }
 
 log_info "Cold-start rescan (start)"; declare -F handle_file >/dev/null || { log_error "handle_file missing"; exit 1; }
