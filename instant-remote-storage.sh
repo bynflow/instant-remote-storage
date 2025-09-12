@@ -398,7 +398,13 @@ handle_file() {
 
   # 4) Extension + clean name normalization
   local assign_output assign_exit_code new_filename save_filename
-  assign_output=$(assign_extension "$local_file"; echo "___EXIT:$?")
+  # Capture assign_extension rc without triggering the ERR trap (avoid set -E propagation)
+  assign_output=$(
+    set +eE
+    assign_extension "$local_file"
+    local rc=$?
+    echo "___EXIT:$rc"
+  )
   assign_exit_code=$(printf '%s' "$assign_output" | sed -n 's/.*___EXIT:\([0-9]\+\)/\1/p')
   assign_output=$(printf '%s' "$assign_output" | sed 's/___EXIT:.*//')
   new_filename=$(printf '%s\n' "$assign_output" | trim)
