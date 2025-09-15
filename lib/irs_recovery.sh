@@ -24,6 +24,24 @@ IRS_TMP_TTL_SECONDS="${IRS_TMP_TTL_SECONDS:-86400}"
 # 0 = do not alter destination (keep whatever the caller passed)
 IRS_STRICT_CONFLICT="${IRS_STRICT_CONFLICT:-1}"
 
+# Update persistent index if main script functions are available.
+# Use the variables saved in the marker: LOCAL, FINAL_REMOTE, HASH.
+_irs_update_index_if_possible() {
+  # Prevent errors here from triggering the main script's ERR trap
+  set +eE
+  if type -t update_index >/dev/null 2>&1; then
+    if [[ -n "${LOCAL:-}" && -e "$LOCAL" ]]; then
+      local fid
+      fid=$(stat -c '%d:%i' -- "$LOCAL" 2>/dev/null || echo "")
+      if [[ -n "$fid" && -n "${FINAL_REMOTE:-}" && -n "${HASH:-}" ]]; then
+        update_index "$fid" "$FINAL_REMOTE" "$HASH" || true
+      fi
+    fi
+  fi
+  # Restore -eE (the main script keeps it enabled)
+  set -eE
+}
+
 ensure_state_dirs() {
   mkdir -p "$INFLIGHT_DIR" || true
   # Best-effort: do not fail if remote is currently unavailable
@@ -71,26 +89,32 @@ _clear_marker() { # $1=path
 # Known composite extensions to preserve when generating "(copy)" names
 _irs_comp_exts=("tar.gz" "tar.bz2" "tar.xz" "tar.zst" "tar.lz4" "tar.br")
 
-# Returns "BASE:::EXT" from a RELATIVE path (no remote prefix), preserving composites
+# Returns "BASE:::EXT" from a RELATIVE path (no remote prefix), preserving composites.
+# If there is no extension (or it's a dotfile), EXT is empty.
 _split_base_ext_rel() {
   local rel="$1"
-  for _e in "${_rs_comp_exts[@]:-tar.gz}" "${_irs_comp_exts[@]}"; do :; done # shell quiet
+  # Preserve known composite extensions
   for _e in "${_irs_comp_exts[@]}"; do
     if [[ "$rel" == *".${_e}" ]]; then
       printf '%s:::%s\n' "${rel%."$_e"}" "$_e"
       return
     fi
   done
-  printf '%s:::%s\n' "${rel%.*}" "${rel##*.}"
+  # No composite: handle extensionless names and dotfiles
+  if [[ "$rel" == .* || "$rel" != *.* ]]; then
+    printf '%s:::\n' "$rel"
+  else
+    printf '%s:::%s\n' "${rel%.*}" "${rel##*.}"
+  fi
 }
 
 # Checks if a remote destination path exists (exact basename match in its parent dir)
 _dest_exists() { # $1=absolute remote path (REMOTE_DIR/…)
-  # Use lsjson (more reliable on WebDAV) to detect exact basename collision
   local dest="$1"
   local parent; parent="$(dirname "$dest")"
   local base; base="$(basename "$dest")"
-  rclone lsjson --files-only "$parent" 2>/dev/null | grep -F "\"Name\":\"$base\"" >/dev/null
+  rclone lsjson --files-only "$parent" 2>/dev/null \
+    | jq -e --arg name "$base" 'any(.[]; .Name == $name)' >/dev/null
 }
 
 # Normalize a few pathological server-side rename outcomes (defensive)
@@ -134,7 +158,8 @@ _next_copy_dest() { # $1=absolute remote path
 
   # increment until free
   local count=1
-  while rclone lsf --files-only "$parent_for_check" 2>/dev/null | grep -Fxq "${new_base_name}${dotext}"; do
+  while rclone lsjson --files-only "$parent_for_check" 2>/dev/null \
+    | jq -e --arg n "${new_base_name}${dotext}" 'any(.[]; .Name == $n)' >/dev/null; do
     count=$((count + 1))
     new_base_name="${base_name}-(copy ${count})"
     if [[ "$base_dir" == "." ]]; then
@@ -143,6 +168,7 @@ _next_copy_dest() { # $1=absolute remote path
       new_rel="${base_dir}/${new_base_name}${dotext}"
     fi
   done
+
 
   printf '%s\n' "$REMOTE_DIR/$new_rel"
 }
@@ -187,9 +213,8 @@ two_phase_upload() {
   _update_marker_status "$MP" "uploaded_tmp"
 
   # ---- Last-chance conflict guard (strict by default) -----------------------
-  # If the destination already exists and we are not explicitly overwriting,
-  # promote tmp to a "(copy)" destination to avoid clobbering existing files.
-  if [[ "$IRS_STRICT_CONFLICT" == "1" && -z "$conflict_flag" ]]; then
+  # Even if caller passed "conflict", double-check to avoid overwriting an existing path.
+  if [[ "$IRS_STRICT_CONFLICT" == "1" ]]; then
     if _dest_exists "$final_remote"; then
       local new_final
       new_final="$(_next_copy_dest "$final_remote")"
@@ -216,7 +241,12 @@ two_phase_upload() {
   awk '/Transferred:/' "$TMP_LOG" | while read -r line; do logger -t "$_tag" "$line"; done || true
   rm -f "$TMP_LOG"
 
-  # Success: clear marker
+  # Success: update index (se disponibile) e poi pulisci il marker
+  if [[ -f "$MP" ]]; then
+    # shellcheck source=/dev/null
+    . "$MP" 2>/dev/null || true
+    _irs_update_index_if_possible
+  fi
   _clear_marker "$MP"
   return 0
 }
@@ -232,16 +262,24 @@ recover_inflight() {
     source "$st" 2>/dev/null || continue
 
     # 1) final exists
-    if rclone lsf --files-only "$(dirname "$FINAL_REMOTE")" 2>/dev/null | grep -Fxq "$(basename "$FINAL_REMOTE")"; then
+    if rclone lsjson --files-only "$(dirname "$FINAL_REMOTE")" 2>/dev/null \
+      | jq -e --arg n "$(basename "$FINAL_REMOTE")" 'any(.[]; .Name == $n)' >/dev/null; then
       logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery: final already present → complete: ${REL:-<unknown>}"
+      . "$st" 2>/dev/null || true
+      _irs_update_index_if_possible
       _clear_marker "$st"
-      continue
+     continue
     fi
 
     # 2) tmp exists → promote
-    if rclone lsf --files-only "$(dirname "$TMP_REMOTE")" 2>/dev/null | grep -Fxq "$(basename "$TMP_REMOTE")"; then
+    if rclone lsjson --files-only "$(dirname "$TMP_REMOTE")" 2>/dev/null \
+    | jq -e --arg n "$(basename "$TMP_REMOTE")" 'any(.[]; .Name == $n)' >/dev/null; then
       logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery: promote tmp → final: ${REL:-<unknown>}"
       if rclone moveto "$TMP_REMOTE" "$FINAL_REMOTE" >/dev/null 2>&1; then
+        # Update the index and then remove the marker
+        # shellcheck source=/dev/null
+        . "$st" 2>/dev/null || true
+        _irs_update_index_if_possible
         _clear_marker "$st"
         logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery ok: ${REL:-<unknown>}"
       else
@@ -253,11 +291,15 @@ recover_inflight() {
     # 3) tmp missing → re-copy and promote
     logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery: re-copy tmp → final: ${REL:-<unknown>}"
     if rclone copyto "$LOCAL" "$TMP_REMOTE" >/dev/null 2>&1 && \
-       rclone moveto "$TMP_REMOTE" "$FINAL_REMOTE" >/dev/null 2>&1; then
-      _clear_marker "$st"
-      logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery ok (re-copy): ${REL:-<unknown>}"
+        rclone moveto "$TMP_REMOTE" "$FINAL_REMOTE" >/dev/null 2>&1; then
+        # Update the index and then remove the marker
+        # shellcheck source=/dev/null
+        . "$st" 2>/dev/null || true
+        _irs_update_index_if_possible
+        _clear_marker "$st"
+        logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery ok (re-copy): ${REL:-<unknown>}"
     else
-      logger -t "${LOG_TAG:-instant-remote-storage}" "[WARNING] Recovery failed: ${REL:-<unknown>} (marker kept)"
+        logger -t "${LOG_TAG:-instant-remote-storage}" "[WARNING] Recovery failed: ${REL:-<unknown>} (marker kept)"
     fi
   done
   shopt -u nullglob

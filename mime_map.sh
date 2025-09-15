@@ -88,6 +88,7 @@ declare -A MIME_EXTENSIONS=(
   ["application/x-lz4"]="lz4"
   ["application/x-brotli"]="br"
   ["application/x-tar"]="tar"
+  ["application/vnd.debian.binary-package"]="deb"
 
   # Code / Data
   ["application/json"]="json"
