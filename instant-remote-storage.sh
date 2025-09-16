@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 
 # ========================================
-# instant-remote-storage - v3.3.0
+# instant-remote-storage - v3.6.5
 # Author : Carlo Capobianchi (bynflow)
 # GitHub : https://github.com/bynflow
-# Last Modified: 2025-09-12
+# Last Modified: 2025-09-16
 # ========================================
 # Watches a local directory (LOCAL_DIR) and uploads files to a remote (REMOTE_DIR)
 # using rclone. Features:
@@ -84,11 +84,14 @@ IRS_TMP_TTL_SECONDS=${IRS_TMP_TTL_SECONDS:-86400}
 # Index (persistent tracking for renames & content updates)
 INDEX_FILE="${INDEX_FILE:-$STATE_DIR/index.tsv}"
 
-# Behavior toggles
-IRS_MIRROR_EMPTY_DIRS=${IRS_MIRROR_EMPTY_DIRS:-1}  # mirror empty dirs only on MOVED_TO
+# Mirror empty dirs (always on MOVED_TO; add CREATE if IRS_MIRROR_DIRS_ON_CREATE=1)
+IRS_MIRROR_EMPTY_DIRS=${IRS_MIRROR_EMPTY_DIRS:-1}  # mirror empty dirs on CREATE and MOVED_TO
 
 # Do not rename files on the remote; treat local renames as new uploads
 IRS_ALLOW_REMOTE_RENAME=${IRS_ALLOW_REMOTE_RENAME:-0}
+
+# Mirror empty dirs also on raw CREATE? (0 = only MOVED_TO, 1 = CREATE + MOVED_TO)
+IRS_MIRROR_DIRS_ON_CREATE=${IRS_MIRROR_DIRS_ON_CREATE:-0}
 
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/irs_recovery.sh"
@@ -99,16 +102,24 @@ send_error_mail() {
   local err_line="${2:-<unknown>}"
   local err_code="${3:-<unknown>}"
 
+  # Must have a configured recipient
+  if [[ -z "${EMAIL_TO:-}" || "${EMAIL_TO}" =~ @example\.com$ ]]; then
+    log_warning "EMAIL_TO not configured (placeholder). Skipping email."
+    return 0
+  fi
+
+  # Must have msmtp config
   if [[ ! -s "$HOME/.msmtprc" ]]; then
     log_warning "Missing or empty ~/.msmtprc. Email disabled."
     return 0
   fi
 
-  local subject recipient from_account from_address body_head body_tail
+  local subject recipient from_account from_address body_head body_tail tag
   subject="Error in instant-remote-storage on $(hostname) - $(date '+%Y-%m-%d %H:%M:%S')"
-  recipient="${EMAIL_TO:-default@example.com}"
+  recipient="$EMAIL_TO"
   from_account="${MSMTP_ACCOUNT:-default}"
   from_address="${EMAIL_FROM:-instant-remote-storage <noreply@localhost>}"
+  tag="${LOG_TAG:-instant-remote-storage}"
 
   body_head=$(cat <<-EOF
     Hello,
@@ -121,7 +132,7 @@ send_error_mail() {
     Last 50 journal lines:
 EOF
   )
-  body_tail=$(journalctl --user -t "$LOG_TAG" -n 50 2>/dev/null || echo "Could not read journal for tag $LOG_TAG")
+  body_tail=$(journalctl --user -t "$tag" -n 50 2>/dev/null || echo "Could not read journal for tag $tag")
   {
     echo "To: $recipient"
     echo "Subject: $subject"
@@ -130,6 +141,7 @@ EOF
     echo
     echo "$body_head$body_tail"
   } | msmtp --from="$from_account" -t 2>/dev/null
+
   local rc=$?
   [[ $rc -ne 0 ]] && log_warning "msmtp failed (rc=$rc)"
   return $rc
@@ -225,17 +237,29 @@ update_index() { # $1=file_id  $2=remote_path  $3=hash
 
 # === Helpers ===
 get_inode() { [[ -e "$1" ]] && stat --format="%i" "$1" || { log_debug "get_inode: not found: $1"; echo ""; }; }
-get_file_id() { # dev:inode, stable across renames on same filesystem
+# Unique id: device:inode:ctime (resta stabile nei rename; diverso per file "nuovi" con inode riutilizzati)
+get_file_id() {
   if [[ -e "$1" ]]; then
-    stat -c '%d:%i' -- "$1" 2>/dev/null || echo ""
+    stat -c '%d:%i:%Z' -- "$1" 2>/dev/null || echo ""
   else
     echo ""
   fi
 }
 
+remote_file_exists() { # $1 = REMOTE_DIR/relpath
+  local dest="$1" parent base
+  parent="$(dirname "$dest")"
+  base="$(basename "$dest")"
+  rclone lsjson --files-only "$parent" 2>/dev/null \
+    | jq -e --arg n "$base" 'any(.[]; .Name == $n)' >/dev/null
+}
+
 cleanup_lock() {
   if [[ -n "${HASHLOCK:-}" && -e "$HASHLOCK" ]]; then
     rm -f "$HASHLOCK"; log_debug "Per-file lock released ($HASHLOCK)"
+  fi
+  if [[ -n "${PATHLOCK:-}" && -e "$PATHLOCK" ]]; then
+    rm -f "$PATHLOCK"; log_debug "Path lock released ($PATHLOCK)"
   fi
 }
 
@@ -395,6 +419,19 @@ handle_file() {
   trap '[[ "${EXIT_REASON:-}" == "ERR" ]] && log_warning "handle_file aborted (ERR) — cleanup lock"; cleanup_lock' RETURN
   log_debug "handle_file start: '$filename'"
 
+  # Path lock (avoid back-to-back events on the same watched path)
+  local path_key
+  path_key=$(printf '%s' "$filename" | sha256sum | awk '{print $1}')
+  PATHLOCK="$LOCKDIR/${path_key}.pathlock"
+  if [[ -e "$PATHLOCK" ]]; then
+    log_warning "Skipped: path busy '$filename'"
+    EXIT_REASON="LOCK"
+    cleanup_lock
+    return 0
+  fi
+  : > "$PATHLOCK"
+  log_debug "Path lock acquired ($PATHLOCK)"
+
   # 0) Stabilize & existence
   if ! wait_for_stable_file "$local_file"; then
     log_info "'$filename' is not stable yet — will retry later"; EXIT_REASON="SKIP"; cleanup_lock; return 0; fi
@@ -464,16 +501,22 @@ handle_file() {
         log_info "Skip unchanged (cold-start): '$filename'"
         EXIT_REASON="OK"; cleanup_lock; return 0
       elif [[ "$idx_remote" == "$remote_path" ]]; then
-        # Explicit local overwrite of the same watched path → always make a copy
-        final_remote_copy="$(_next_copy_dest "$REMOTE_DIR/$filename")"
-        if ! two_phase_upload "$local_file" "$final_remote_copy" "$hash" "$inode" "repeat-copy"; then
-          log_error "Repeat-copy upload failed: '$filename'"; send_error_mail || true; EXIT_REASON="ERR"; cleanup_lock; return 1
+        # Always-copy ONLY if the target path already exists remotely.
+        if remote_file_exists "$remote_path"; then
+          local final_remote_copy
+          final_remote_copy="$(_next_copy_dest "$REMOTE_DIR/$filename")"
+          if ! two_phase_upload "$local_file" "$final_remote_copy" "$hash" "$inode" "repeat-copy"; then
+            log_error "Repeat-copy upload failed: '$filename'"; send_error_mail || true; EXIT_REASON="ERR"; cleanup_lock; return 1
+          fi
+          log_info "Repeat-copy completed: '$filename' -> '$(basename "$final_remote_copy")'"
+          path_hash_key="${hash}___${filename}"
+          PATH_HASH_SEEN["$path_hash_key"]="$inode"
+          [[ -n "$file_id" ]] && update_index "$file_id" "$final_remote_copy" "$hash"
+          EXIT_REASON="OK"; cleanup_lock; return 0
+        else
+          log_debug "Repeat-copy bypassed: remote does not contain '$remote_path' yet"
+          # fall-through to normal upload
         fi
-        log_info "Repeat-copy completed: '$filename' -> '$(basename "$final_remote_copy")'"
-        path_hash_key="${hash}___${filename}"
-        PATH_HASH_SEEN["$path_hash_key"]="$inode"
-        [[ -n "$file_id" ]] && update_index "$file_id" "$final_remote_copy" "$hash"
-        EXIT_REASON="OK"; cleanup_lock; return 0
       fi
     fi
 
@@ -506,36 +549,48 @@ handle_file() {
     fi
   fi
 
-  # 7) Conflict policy (overwrite if we own the path, else copy-as-conflict)
-  local rel_dir; rel_dir=$(dirname "$filename")
-  local remote_dir_for_check="$REMOTE_DIR"; [[ "$rel_dir" != "." ]] && remote_dir_for_check="$REMOTE_DIR/$rel_dir"
-  ensure_remote_dir "$remote_dir_for_check" || true
-  local remote_base; remote_base=$(basename "$filename")
-  local remote_exists=1
-  # Prefer lsjson (more reliable on WebDAV); fallback to lsf
-  if rclone lsjson --files-only "$remote_dir_for_check" 2>/dev/null \
-    | jq -e --arg n "$remote_base" 'any(.[]; .Name == $n)' >/dev/null; then
+
+  # 7) Cold-start preflight (must run BEFORE conflict policy)
+  ensure_remote_dir "$(dirname "$remote_path")" || true
+
+  # Check remote existence once and reuse the result
+  local remote_exists
+  if remote_file_exists "$remote_path"; then
     remote_exists=0  # 0 == exists
+  else
+    remote_exists=1
   fi
 
-  # --- Name conflict (another file already owns that remote name) --------------
-  # The target remote path exists but does not belong to this file_id → copy
+  # If we are in cold-start and the target path already exists remotely with the same size,
+  # assume it's the same file: index it and skip to avoid spurious "(copy)".
+  if [[ "${IRS_COLD_START:-0}" == "1" && $remote_exists -eq 0 ]]; then
+    local local_size
+    local_size=$(stat -c%s "$local_file" 2>/dev/null || echo 0)
+    if rclone lsjson --files-only "$(dirname "$remote_path")" 2>/dev/null \
+      | jq -e --arg n "$(basename "$remote_path")" --argjson s "$local_size" \
+           'any(.[]; .Name == $n and ((.Size // -1) == $s))' >/dev/null; then
+      log_info "Skip unchanged (cold-start): '$filename' (indexed existing remote)"
+      path_hash_key="${hash}___${filename}"
+      PATH_HASH_SEEN["$path_hash_key"]="$inode"
+      [[ -n "$file_id" ]] && update_index "$file_id" "$remote_path" "$hash"
+      EXIT_REASON="OK"; cleanup_lock; return 0
+    fi
+  fi
+
+  # 8) Conflict policy (copy if the remote name is already taken by another file_id)
   if [[ $remote_exists -eq 0 && ( -z "$file_id" || "${INDEX_REMOTE_PATH[$file_id]:-}" != "$remote_path" ) ]]; then
     final_remote="$(_next_copy_dest "$REMOTE_DIR/$filename")"
     if ! two_phase_upload "$local_file" "$final_remote" "$hash" "$inode" "conflict"; then
       log_error "Conflict upload failed: '$filename'"; send_error_mail || true; EXIT_REASON="ERR"; return 1
     fi
     log_info "Conflict upload completed: '$filename' -> '$(basename "$final_remote")'"
-    # mark processed + index
     path_hash_key="${hash}___${filename}"
     PATH_HASH_SEEN["$path_hash_key"]="$inode"
     [[ -n "$file_id" ]] && update_index "$file_id" "$final_remote" "$hash"
-    EXIT_REASON="OK"
-    cleanup_lock
-    return 0
+    EXIT_REASON="OK"; cleanup_lock; return 0
   fi
 
-  # --- Overwrite or first upload (with strict conflict guard) -------------------
+  # 9) Overwrite or first upload (with strict conflict guard) -------------------
   # Default path: try to upload to the expected remote path.
   final_remote="$remote_path"
   if ! two_phase_upload "$local_file" "$final_remote" "$hash" "$inode"; then
@@ -561,7 +616,7 @@ handle_file() {
     log_info "Upload completed: '$filename'"
   fi
 
-  # 8) Mark processed and update index
+  # 10) Mark processed and update index
   path_hash_key="${hash}___${filename}"
   if [[ "${PATH_HASH_SEEN[$path_hash_key]:-}" == "$inode" ]]; then EXIT_REASON="SKIP"; cleanup_lock; return 0; fi
   PATH_HASH_SEEN["$path_hash_key"]="$inode"
@@ -576,9 +631,13 @@ on_exit() {
   log_info "instant-remote-storage exited at $(date '+%Y-%m-%d %H:%M:%S')"
   if [[ -n "${LOCKDIR:-}" && -d "$LOCKDIR" ]]; then rm -rf "$LOCKDIR" || true; log_debug "Removed LOCKDIR: $LOCKDIR"; fi
 }
-on_interrupt() { log_warning "Interrupted. Exiting..."; exit 130; }
+
+on_interrupt() { 
+  log_warning "Interrupted. Exiting..."; 
+  exit 0        # clean exit for systemd (no 'failed' status)
+}
 trap 'on_exit' EXIT
-trap 'on_interrupt' INT TERM
+trap 'on_interrupt' INT TERM HUP
 
 cold_start_rescan() {
 while IFS= read -r -d '' f; do
@@ -613,31 +672,70 @@ IRS_COLD_START=0
 main_loop() {
   local inode=""
   log_info "Starting watcher on $(hostname) at $(date)"
+
+  # Cold-start: mirror any pre-existing empty local directories to the remote
+  if [[ "$IRS_MIRROR_EMPTY_DIRS" == "1" ]]; then
+    while IFS= read -r -d '' DIR; do
+      # Skip the root watch directory itself
+      [[ "$DIR" == "$LOCAL_DIR" ]] && continue
+      # Make SUBPATH robust whether or not $LOCAL_DIR ends with a slash
+      local SUBPATH
+      SUBPATH="${DIR#"$LOCAL_DIR"}"
+      SUBPATH="${SUBPATH#/}"
+      rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1 || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
+    done < <(find "$LOCAL_DIR" -mindepth 1 -type d -empty -print0 2>/dev/null)
+  fi
+
   while IFS=":::" read -r FULLPATH EVENT; do
-    RELATIVE_PATH="${FULLPATH#"$LOCAL_DIR"/}"; RELATIVE_PATH="${RELATIVE_PATH#./}"; log_debug "Event '$EVENT' -> $RELATIVE_PATH"
-    local BN; BN=$(basename "$RELATIVE_PATH")
+    local RELATIVE_PATH BN
+    RELATIVE_PATH="${FULLPATH#"$LOCAL_DIR"/}"
+    RELATIVE_PATH="${RELATIVE_PATH#./}"
+    log_debug "Event '$EVENT' -> $RELATIVE_PATH"
+    BN=$(basename "$RELATIVE_PATH")
+
+    # Skip temp/hidden patterns
     if [[ "$BN" =~ ^\.goutputstream || "$BN" =~ \.(swp|part|tmp|bak)$ || "$BN" =~ ^\..* ]]; then
-      log_warning "Skipped early in main_loop: $RELATIVE_PATH"; continue
+      log_warning "Skipped early in main_loop: $RELATIVE_PATH"
+      continue
     fi
 
+    # Handle directory events
     if [[ -d "$FULLPATH" ]]; then
-      # Mirror empty directories only when the final name is committed (MOVED_TO)
-      if [[ "$IRS_MIRROR_EMPTY_DIRS" == "1" && "$EVENT" == *"MOVED_TO"* ]]; then
+      # Mirror directories on MOVED_TO (final name) and/or CREATE (toggle below)
+      # If you want to avoid temporary names like "Untitled Folder", prefer MOVED_TO only.
+      if [[ "$IRS_MIRROR_EMPTY_DIRS" == "1" && ( "$EVENT" == *"MOVED_TO"* || ( "$IRS_MIRROR_DIRS_ON_CREATE" == "1" && "$EVENT" == *"CREATE"* ) ) ]]; then
+        # 1) Ensure the directory itself exists remotely
+        local SUBPATH
+        SUBPATH="${FULLPATH#"$LOCAL_DIR"}"
+        SUBPATH="${SUBPATH#/}"
+        rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1 || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
+
+        # 2) Ensure any currently-empty subdirectories inside it exist remotely
         while IFS= read -r -d '' DIR; do
-          SUBPATH="${DIR#"$LOCAL_DIR"/}"
+          SUBPATH="${DIR#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
           rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1 || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
-        done < <(find "$FULLPATH" -type d -empty -print0)
+        done < <( { find "$FULLPATH" -mindepth 1 -type d -empty -print0 2>/dev/null || true; } )
       fi
-      # Process files within the directory
+
+      # Process files within the directory (be tolerant to races)
       while IFS= read -r -d '' FILE; do
         [[ -e "$FILE" ]] || { log_debug "Vanished after scan: ${FILE#"$LOCAL_DIR"/}"; continue; }
-        RELFILE="${FILE#"$LOCAL_DIR"/}"; inode=$(get_inode "$FILE"); [[ -z "$inode" ]] && continue
+        local RELFILE
+        RELFILE="${FILE#"$LOCAL_DIR"/}"
+        inode=$(get_inode "$FILE"); [[ -z "$inode" ]] && continue
         handle_file "$FILE" "$RELFILE" "$inode"
-      done < <(find "$FULLPATH" -type f -print0)
+      done < <( { find "$FULLPATH" -type f -print0 2>/dev/null || true; } )
+
+      continue
 
     elif [[ -f "$FULLPATH" ]]; then
+      # File events
       [[ -e "$FULLPATH" ]] || { log_debug "Vanished after event: $RELATIVE_PATH"; continue; }
-      local FILE_HASH=""; if ! FILE_HASH=$(compute_hash "$FULLPATH"); then log_debug "Hash race for $RELATIVE_PATH"; continue; fi
+      local FILE_HASH=""
+      if ! FILE_HASH=$(compute_hash "$FULLPATH"); then
+        log_debug "Hash race for $RELATIVE_PATH"; continue
+      fi
+      local path_hash_key original_pair
       path_hash_key="${FILE_HASH}___${RELATIVE_PATH}"; original_pair="$path_hash_key"
       if should_skip_due_to_transform_map "$original_pair"; then continue; fi
       [[ -e "$FULLPATH" ]] || { log_debug "Vanished before inode read: $RELATIVE_PATH"; continue; }
@@ -648,6 +746,7 @@ main_loop() {
       handle_file "$FULLPATH" "$RELATIVE_PATH" "$inode"
     fi
   done < <(inotifywait -m -r -e create,close_write,moved_to --format '%w%f:::%e' "$LOCAL_DIR")
+
   log_info "Watch loop terminated unexpectedly"
 }
 

@@ -114,5 +114,5 @@ declare -A MIME_EXTENSIONS=(
   ["application/font-woff2"]="woff2"
 
   # Other
-  ["application/octet-stream"]="bin"
+  # ["application/octet-stream"]="bin"
 )

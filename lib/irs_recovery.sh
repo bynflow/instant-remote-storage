@@ -265,6 +265,7 @@ recover_inflight() {
     if rclone lsjson --files-only "$(dirname "$FINAL_REMOTE")" 2>/dev/null \
       | jq -e --arg n "$(basename "$FINAL_REMOTE")" 'any(.[]; .Name == $n)' >/dev/null; then
       logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery: final already present → complete: ${REL:-<unknown>}"
+      # shellcheck source=/dev/null
       . "$st" 2>/dev/null || true
       _irs_update_index_if_possible
       _clear_marker "$st"
