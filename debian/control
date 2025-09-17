@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Carlo Capobianchi <bynrflow@gmail.com>
 Build-Depends:
  debhelper-compat (= 13),
-Standards-Version: 4.6.2
+Standards-Version: 4.7.2
 Homepage: https://github.com/bynflow/instant-remote-storage
 Vcs-Git: https://github.com/bynflow/instant-remote-storage.git
 Vcs-Browser: https://github.com/bynflow/instant-remote-storage
