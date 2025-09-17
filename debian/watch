@@ -1,3 +1,3 @@
 version=4
-# Upstream tarballs are not yet published at a stable URL.
-# A proper watch stanza will be added once releases are public.
+opts=mode=git,pretty=0 https://github.com/bynflow/instant-remote-storage.git \
+    refs/tags/v?(\d[\d.]*)
