@@ -1,3 +1,17 @@
+instant-remote-storage (3.1.0-1) unstable; urgency=medium
+
+  * New upstream release: cold-start dedup; conflict policy reorder;
+    directory mirroring toggles; safer file-create handling; misc fixes.
+
+ -- Carlo Capobianchi <bynflow@gmail.com>  Wed, 17 Sep 2025 01:58:33 +0200
+
+instant-remote-storage (3.1.0-1) unstable; urgency=medium
+
+  * New upstream release: cold-start dedup; conflict policy reorder;
+    directory mirroring toggles; safer file-create handling; misc fixes.
+
+ -- Carlo Capobianchi <bynflow@gmail.com>  Wed, 17 Sep 2025 01:47:18 +0200
+
 instant-remote-storage (3.0.0-14) unstable; urgency=medium
 
   * Avoid duplicate re-uploads after reboot: skip files whose device+inode,

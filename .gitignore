@@ -55,3 +55,19 @@ rclone.conf
 *.rej
 #*#
 
+# venv locali e direnv
+.venv/
+.direnv/
+
+# alberi di build locali se mai li crei dentro al repo
+build-*/
+build-area/
+
+# assicura che alcuni file di packaging restino tracciati anche se in futuro
+# aggiungerai regole più aggressive
+!debian/patches/**
+!debian/install
+!debian/manpages
+!debian/wrapper/**
+!debian/upstream/**
+
