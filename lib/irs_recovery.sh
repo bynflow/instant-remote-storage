@@ -32,7 +32,7 @@ _irs_update_index_if_possible() {
   if type -t update_index >/dev/null 2>&1; then
     if [[ -n "${LOCAL:-}" && -e "$LOCAL" ]]; then
       local fid
-      fid=$(stat -c '%d:%i' -- "$LOCAL" 2>/dev/null || echo "")
+      fid=$(stat -c '%d:%i:%Z' -- "$LOCAL" 2>/dev/null || echo "")
       if [[ -n "$fid" && -n "${FINAL_REMOTE:-}" && -n "${HASH:-}" ]]; then
         update_index "$fid" "$FINAL_REMOTE" "$HASH" || true
       fi
@@ -251,11 +251,58 @@ two_phase_upload() {
   return 0
 }
 
+cleanup_stale_tmp() {
+  local now ts mp age
+  now=$(date +%s)
+
+  # --- GC local markers (best-effort) ---------------------------------------
+  shopt -s nullglob
+  for mp in "$INFLIGHT_DIR"/*.state; do
+    ts=$(sed -n 's/^STARTED_AT=\(.*\)$/\1/p' "$mp" 2>/dev/null || echo "")
+    [[ -n "$ts" ]] || continue
+    age=$(( now - ts ))
+    if (( age > IRS_TMP_TTL_SECONDS )); then
+      rm -f -- "$mp" 2>/dev/null || true
+      logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] GC: removed stale marker $(basename "$mp")"
+    fi
+  done
+  shopt -u nullglob
+
+  # --- GC orphan remote tmp files (best-effort, never fatal) -----------------
+  set +eE  # do not let errors here kill the daemon
+  if rclone lsf "$REMOTE_TMP_DIR" >/dev/null 2>&1; then
+    # Some backends don’t expose ModTime; we skip those entries
+    rclone lsjson "$REMOTE_TMP_DIR" 2>/dev/null \
+    | jq -r --arg now "$(date -u +%s)" --arg ttl "$IRS_TMP_TTL_SECONDS" '
+        .[]
+        | select((.IsDir // false) | not)
+        | (.Path // .Name) as $name
+        | (.ModTime // "") as $mt
+        | select(($mt | length) > 0)
+        | ($mt | sub("\\.[0-9]+Z$"; "Z")) as $mt2
+        | ($mt2 | fromdateiso8601) as $t
+        | select(($t | type) == "number")
+        | select((($now | tonumber) - $t) > ($ttl | tonumber))
+        | $name
+      ' 2>/dev/null \
+    | while IFS= read -r orphan; do
+        [[ -n "$orphan" ]] || continue
+        rclone deletefile "$REMOTE_TMP_DIR/$orphan" >/dev/null 2>&1 && \
+          logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] GC: deleted stale remote tmp '$orphan'" || \
+          logger -t "${LOG_TAG:-instant-remote-storage}" "[WARNING] GC: failed to delete remote tmp '$orphan'"
+      done
+  else
+    logger -t "${LOG_TAG:-instant-remote-storage}" "[DEBUG] GC: remote tmp dir missing/unreachable, skipping"
+  fi
+  set -eE  # restore -e
+}
+
 # Startup recovery:
 #  1) final already present → clear marker
 #  2) tmp exists           → promote to final
 #  3) tmp missing          → re-copy local → tmp, then promote
 recover_inflight() {
+  set +eE
   shopt -s nullglob
   for st in "$INFLIGHT_DIR"/*.state; do
     # shellcheck source=/dev/null
@@ -304,4 +351,7 @@ recover_inflight() {
     fi
   done
   shopt -u nullglob
+  set -eE
 }
+
+cleanup_stale_tmp

@@ -71,9 +71,12 @@ else
   log_warning "No environment file found (using built-in defaults)"
 fi
 
-# === Configuration (defaults; can be overridden by env files) ===
+# Waiting for remote at bootstrap (default: no waiting, best-effort)
 LOCAL_DIR=${LOCAL_DIR:-"$HOME/remote-storage"}
 REMOTE_DIR=${REMOTE_DIR:-"remote:your-remote-directory"}
+
+# Attesa del remote al bootstrap (default: nessuna attesa, best-effort)
+IRS_REMOTE_WAIT_SECS=${IRS_REMOTE_WAIT_SECS:-0}
 
 # State / recovery
 STATE_DIR=${STATE_DIR:-"$HOME/.local/state/instant-remote-storage"}
@@ -84,14 +87,39 @@ IRS_TMP_TTL_SECONDS=${IRS_TMP_TTL_SECONDS:-86400}
 # Index (persistent tracking for renames & content updates)
 INDEX_FILE="${INDEX_FILE:-$STATE_DIR/index.tsv}"
 
-# Mirror empty dirs (always on MOVED_TO; add CREATE if IRS_MIRROR_DIRS_ON_CREATE=1)
-IRS_MIRROR_EMPTY_DIRS=${IRS_MIRROR_EMPTY_DIRS:-1}  # mirror empty dirs on CREATE and MOVED_TO
+# Offset per il numero mostrato: 0 = prima modifica -> (ver 1); 1 = -> (ver 2)
+IRS_VER_BASE_OFFSET=${IRS_VER_BASE_OFFSET:-1}
+[[ "$IRS_VER_BASE_OFFSET" =~ ^-?[0-9]+$ ]] || IRS_VER_BASE_OFFSET=0
 
-# Do not rename files on the remote; treat local renames as new uploads
+# --- Behavior toggles -------------------------------------------------
+# Zero-byte upload policy:
+# 1 = eager: upload even on CREATE/CLOSE_WRITE (e.g., `touch` from a shell)
+# 0 = hold : wait for MOVED_TO (final name) or for the file to become >0 bytes [DEFAULT]
+IRS_UPLOAD_ZERO_ON_CREATE=${IRS_UPLOAD_ZERO_ON_CREATE:-0}
+
+# Versioning scope:
+# 1 = add " (ver N)" ONLY when we detect an on-place edit of the same path [DEFAULT]
+# 0 = keep existing behavior (external collisions → "(copy)" etc.)
+IRS_VERSION_ONLY_ON_PLACE=${IRS_VERSION_ONLY_ON_PLACE:-1}
+
+# Remote rename toggle (pure renames):
+# 1 = allow server-side rename; 0 = treat renames as new uploads [DEFAULT]
 IRS_ALLOW_REMOTE_RENAME=${IRS_ALLOW_REMOTE_RENAME:-0}
 
-# Mirror empty dirs also on raw CREATE? (0 = only MOVED_TO, 1 = CREATE + MOVED_TO)
+# Empty directories mirroring:
+# Enable feature and choose events (CREATE gated by IRS_MIRROR_DIRS_ON_CREATE)
+IRS_MIRROR_EMPTY_DIRS=${IRS_MIRROR_EMPTY_DIRS:-1}
 IRS_MIRROR_DIRS_ON_CREATE=${IRS_MIRROR_DIRS_ON_CREATE:-0}
+
+# --- Debounce for first writes/creates (wait for a rename) ---
+IRS_HOLD_CREATE_SECONDS=${IRS_HOLD_CREATE_SECONDS:-15}
+declare -A FIRST_SEEN=()   # key=RELATIVE_PATH, val=epoch seconds
+
+# Simple persistent state to count versions per relative path
+IRS_STATE_DIR=${IRS_STATE_DIR:-"${XDG_STATE_HOME:-$HOME/.local/state}/instant-remote-storage"}
+mkdir -p "$IRS_STATE_DIR"
+IRS_VERS_DB="$IRS_STATE_DIR/versions.tsv"
+touch "$IRS_VERS_DB"
 
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/irs_recovery.sh"
@@ -167,12 +195,17 @@ done
 
 # === Preflight ===
 mkdir -p "$LOCAL_DIR" || { log_error "Failed to create LOCAL_DIR: $LOCAL_DIR"; send_error_mail || true; exit 1; }
-if ! rclone mkdir "$REMOTE_DIR" >/dev/null 2>&1; then
-  log_warning "Remote directory may not exist or cannot be created: $REMOTE_DIR"
-fi
-if ! rclone lsf "$REMOTE_DIR" &>/dev/null; then
-  log_error "Remote '$REMOTE_DIR' not reachable"; send_error_mail || true; exit 1
-fi
+
+# Best-effort: non fallire se il remote non è pronto; eventuale attesa breve controllata da IRS_REMOTE_WAIT_SECS (default 0)
+set +eE
+rclone mkdir "$REMOTE_DIR" >/dev/null 2>&1 || log_warning "Remote directory may not exist or cannot be created: $REMOTE_DIR"
+
+WAIT=${IRS_REMOTE_WAIT_SECS:-0}
+while ! rclone lsf "$REMOTE_DIR" >/dev/null 2>&1; do
+  (( WAIT-- <= 0 )) && { log_warning "Remote '$REMOTE_DIR' not reachable yet (continuing best-effort)"; break; }
+  sleep 1
+done
+set -eE
 
 # === Process-scoped lock dir ===
 LOCKDIR="$(mktemp -d /tmp/irs-locks.XXXXXX)"
@@ -237,10 +270,10 @@ update_index() { # $1=file_id  $2=remote_path  $3=hash
 
 # === Helpers ===
 get_inode() { [[ -e "$1" ]] && stat --format="%i" "$1" || { log_debug "get_inode: not found: $1"; echo ""; }; }
-# Unique id: device:inode:ctime (resta stabile nei rename; diverso per file "nuovi" con inode riutilizzati)
+# Unique ID: device:inode (stable during renaming and saving)
 get_file_id() {
   if [[ -e "$1" ]]; then
-    stat -c '%d:%i:%Z' -- "$1" 2>/dev/null || echo ""
+    stat -c '%d:%i' -- "$1" 2>/dev/null || echo ""
   else
     echo ""
   fi
@@ -263,6 +296,22 @@ cleanup_lock() {
   fi
 }
 
+# Returns the last known hash for a given absolute remote path (REMOTE_DIR/rel).
+# Looks up by path (not by file_id). Prints the hash or an empty string.
+get_last_hash_for_remote_path() {
+  local abs="$1" fid
+  set +e
+  for fid in "${!INDEX_REMOTE_PATH[@]}"; do
+    if [[ "${INDEX_REMOTE_PATH[$fid]}" == "$abs" ]]; then
+      printf '%s\n' "${INDEX_HASH[$fid]:-}"
+      set -e
+      return 0
+    fi
+  done
+  set -e
+  printf '\n'
+}
+
 # Composite extensions to preserve
 composite_exts=("tar.gz" "tar.bz2" "tar.xz" "tar.zst" "tar.lz4" "tar.br")
 
@@ -281,7 +330,11 @@ split_base_ext() {
 
 get_mime() {
   local file_path="$1"
-  [[ ! -s "$file_path" ]] && { log_warning "'$file_path' is empty -> skipped."; echo ""; return; }
+  if [[ ! -s "$file_path" ]]; then
+    log_warning "'$file_path' is empty → MIME undetectable; keeping original name."
+    echo ""
+    return
+  fi
   xdg-mime query filetype "$file_path" 2>/dev/null || file --mime-type -b "$file_path"
 }
 
@@ -366,13 +419,21 @@ clean_name() {
 }
 
 wait_for_stable_file() {
-  local file="$1"; local retries=1000; local interval=0.5; local last_size=-1; local size
-  for ((i=0; i<retries; i++)); do
-    size=$(stat -c %s "$file" 2>/dev/null || echo -1)
-    if [[ "$size" -eq "$last_size" && "$size" -gt 0 ]]; then return 0; fi
-    last_size=$size; sleep "$interval"
+  local path="$1" last_size=-1 size tries=${2:-5} sleep_s=${3:-0.4}
+
+  while (( tries-- > 0 )); do
+    [[ -e "$path" ]] || return 1
+    size=$(stat -c %s -- "$path" 2>/dev/null || echo -1)
+    # Treat as stable once size stops changing (even if it’s zero).
+    if [[ "$size" -ge 0 && "$size" -eq "$last_size" ]]; then
+      return 0
+    fi
+    last_size="$size"
+    sleep "$sleep_s"
   done
-  log_error "File not stable after retries: '$file'"; return 1
+
+  [[ -e "$path" ]] || return 1
+  return 0
 }
 
 compute_hash() { [[ -f "$1" ]] || { log_warning "compute_hash: invalid path '$1'"; return 1; }; sha256sum "$1" 2>/dev/null | awk '{print $1}'; }
@@ -398,17 +459,73 @@ should_skip_due_to_transform_map() {
   return 1
 }
 
+# Bump and return next N for "path\tN" in versions.tsv (robusto ai duplicati)
+irs_next_ver() {
+  local rel="$1" max
+  max=$(awk -F'\t' -v p="$rel" '
+    $1==p && $2 ~ /^[0-9]+$/ { if ($2>m) m=$2; f=1 }
+    END { if (f) print m; else print 0 }
+  ' "$IRS_VERS_DB" 2>/dev/null)
+  : "${max:=0}"
+  local next=$(( max + 1 ))
+
+  # Scrivi una singola riga per la path con il nuovo valore e rimuovi duplicati
+  awk -F'\t' -v p="$rel" -v n="$next" '
+    BEGIN { done=0 }
+    $1==p && !done { print p "\t" n; done=1; next }  # prima occorrenza aggiornata
+    $1==p { next }                                   # scarta duplicati successivi
+    { print }
+    END { if (!done) print p "\t" n }
+  ' "$IRS_VERS_DB" > "$IRS_VERS_DB.tmp" && mv -f "$IRS_VERS_DB.tmp" "$IRS_VERS_DB"
+
+  printf '%s' "$next"
+}
+
+# Ensure the path exists once in the DB (idempotente, niente duplicati)
+irs_touch_path() {
+  local rel="$1"
+  if grep -Fq "^${rel}"$'\t' "$IRS_VERS_DB" 2>/dev/null; then
+    return 0
+  fi
+  printf '%s\t0\n' "$rel" >> "$IRS_VERS_DB"
+}
+
+# Build "name-(ver N).ext" while preserving the extension
+add_version_suffix() {
+  local rel="$1" ver="$2"
+  local dir base ext
+  dir=$(dirname -- "$rel"); base=$(basename -- "$rel"); ext=""
+  if [[ "$base" == *.* ]]; then ext=".${base##*.}"; base="${base%.*}"; fi
+  printf '%s/%s-(ver %s)%s' "$dir" "$base" "$ver" "$ext"
+}
+
+# Decide if we should version (ONLY for on-place edits of an already uploaded path)
+should_version_on_place() {
+  [[ "$IRS_VERSION_ONLY_ON_PLACE" != 1 ]] && return 1
+  local rel="$1" ev="$2"
+  case "$ev" in
+    CLOSE_WRITE|MOVED_TO) ;;   # "save"-like events
+    *) return 1 ;;
+  esac
+  grep -Fq "^${rel}"$'\t' "$IRS_VERS_DB" 2>/dev/null
+}
+
 ensure_remote_dir() { local dir="$1"; rclone mkdir "$dir" >/dev/null 2>&1 || { log_warning "Cannot ensure remote dir: $dir"; return 1; }; }
 
 # === Load persistent index ===
 load_index
 
 # === State dirs and recovery ===
+set +eE
 log_info "Recovery bootstrap: ensure_state_dirs"
 ensure_state_dirs || log_warning "ensure_state_dirs best-effort failed"
+
 log_info "Recovery bootstrap: recover_inflight (start)"
 recover_inflight || log_info "recover_inflight: nothing to do or best-effort failed"
 log_info "Recovery bootstrap: recover_inflight (done)"
+
+cleanup_stale_tmp || log_warning "cleanup_stale_tmp best-effort failed"
+set -eE
 
 handle_file() {
   local local_file="$1"    # absolute path
@@ -492,6 +609,46 @@ handle_file() {
   fi
   remote_path="$REMOTE_DIR/$filename"
 
+  # --- Unified on-place versioning (state-only, no remote calls) -------------
+  # Se il *percorso* è già noto localmente (index/versions DB) e il contenuto è
+  # cambiato, crea 'name-(ver N).ext'. Copre atomic save (inode nuovo) e rewrite.
+  if should_version_on_place "$filename" "CLOSE_WRITE"; then
+    # Ultimo hash noto per questo percorso (dal nostro index in RAM)
+    local prev_hash_for_path=""
+    prev_hash_for_path="$(get_last_hash_for_remote_path "$remote_path")"
+
+    # Considera "path noto" anche se abbiamo solo la versions DB
+    local path_known=""
+    if [[ -z "$prev_hash_for_path" ]]; then
+      if grep -Fq "^${filename}"$'\t' "$IRS_VERS_DB" 2>/dev/null; then
+        path_known="1"
+      fi
+    else
+      path_known="1"
+    fi
+
+    # Versiona se (path noto) e (hash cambia o non abbiamo hash precedente)
+    if [[ "$path_known" == "1" && ( -z "$prev_hash_for_path" || "$prev_hash_for_path" != "$hash" ) ]]; then
+      local ver show_ver dest_remote
+      ver="$(irs_next_ver "$filename")"
+      show_ver=$(( ver + IRS_VER_BASE_OFFSET ))
+      dest_remote="$REMOTE_DIR/$(add_version_suffix "$filename" "$show_ver")"
+
+      if ! two_phase_upload "$local_file" "$dest_remote" "$hash" "$inode" "content-change"; then
+        log_error "Version upload failed: '$filename'"
+        send_error_mail || true
+        EXIT_REASON="ERR"; cleanup_lock; return 1
+      fi
+
+      irs_touch_path "$filename"
+      [[ -n "$file_id" ]] && update_index "$file_id" "$dest_remote" "$hash"
+      path_hash_key="${hash}___${filename}"
+      PATH_HASH_SEEN["$path_hash_key"]="$inode"
+      EXIT_REASON="OK"; cleanup_lock; return 0
+    fi
+  fi
+  # ---------------------------------------------------------------------------
+
   # 4.5) Unchanged vs content-change
   if [[ -n "$file_id" && -n "$idx_remote" && -n "$idx_hash" ]]; then
     if [[ "$idx_hash" == "$hash" ]]; then
@@ -521,12 +678,27 @@ handle_file() {
     fi
 
     if [[ "$idx_hash" != "$hash" ]]; then
-      local final_remote_copy
-      final_remote_copy="$(_next_copy_dest "$REMOTE_DIR/$filename")"
-      if ! two_phase_upload "$local_file" "$final_remote_copy" "$hash" "$inode" "conflict"; then
-        log_error "Content-change copy upload failed: '$filename'"; send_error_mail || true; EXIT_REASON="ERR"; return 1
+      # Content change on the same path → versioning-on-place OR fallback to (copy)
+      local dest_remote
+
+      if should_version_on_place "$filename" "CLOSE_WRITE"; then
+        # produce ".../(ver N).ext" preserving the ext
+        local ver
+        ver=$(irs_next_ver "$filename")
+        dest_remote="$REMOTE_DIR/$(add_version_suffix "$filename" "$ver")"
+      else
+        # safety net (shouldn't trigger often): use regular "(copy)" policy
+        dest_remote="$(_next_copy_dest "$REMOTE_DIR/$filename")"
       fi
-      [[ -n "$file_id" ]] && update_index "$file_id" "$final_remote_copy" "$hash"
+
+      if ! two_phase_upload "$local_file" "$dest_remote" "$hash" "$inode" "content-change"; then
+        log_error "Content-change upload failed: '$filename'"; send_error_mail || true; EXIT_REASON="ERR"; return 1
+      fi
+
+      # Mark path as known for future on-place edits and index the last upload
+      irs_touch_path "$filename"
+      [[ -n "$file_id" ]] && update_index "$file_id" "$dest_remote" "$hash"
+
       path_hash_key="${hash}___${filename}"
       PATH_HASH_SEEN["$path_hash_key"]="$inode"
       EXIT_REASON="OK"; cleanup_lock; return 0
@@ -577,8 +749,37 @@ handle_file() {
     fi
   fi
 
-  # 8) Conflict policy (copy if the remote name is already taken by another file_id)
-  if [[ $remote_exists -eq 0 && ( -z "$file_id" || "${INDEX_REMOTE_PATH[$file_id]:-}" != "$remote_path" ) ]]; then
+    # 8) Conflict policy (name already taken by another file_id)
+    if [[ $remote_exists -eq 0 && ( -z "$file_id" || "${INDEX_REMOTE_PATH[$file_id]:-}" != "$remote_path" ) ]]; then
+    # --- LAST-CHANCE ON-PLACE VERSIONING GUARD ------------------------------
+    # Se il nome remoto esiste già ed è lo stesso path, e:
+    #  - abbiamo un hash precedente indicizzato per quel path diverso dall'attuale, OPPURE
+    #  - il path risulta “conosciuto” in versions.tsv (=> on-place edit),
+    # allora creiamo "…-(ver N).ext" invece di "…-(copy)".
+    if [[ "${IRS_VERSION_ONLY_ON_PLACE:-1}" -eq 1 ]]; then
+      # (a) lookup per path nell'indice
+      last_hash_for_path="$(get_last_hash_for_remote_path "$remote_path")"
+      # (b) path “conosciuto” in versions.tsv?
+      if grep -Fq "^${filename}"$'\t' "$IRS_VERS_DB" 2>/dev/null || \
+         { [[ -n "$last_hash_for_path" && "$last_hash_for_path" != "$hash" ]]; }; then
+        ver="$(irs_next_ver "$filename")"
+        dest_remote="$REMOTE_DIR/$(add_version_suffix "$filename" "$ver")"
+        if ! two_phase_upload "$local_file" "$dest_remote" "$hash" "$inode" "content-change"; then
+          log_error "Conflict→version upload failed: '$filename'"
+          send_error_mail || true
+          EXIT_REASON="ERR"; cleanup_lock; return 1
+        fi
+        log_info "Conflict resolved by versioning: '$filename' -> '$(basename "$dest_remote")'"
+        irs_touch_path "$filename"
+        [[ -n "$file_id" ]] && update_index "$file_id" "$dest_remote" "$hash"
+        path_hash_key="${hash}___${filename}"
+        PATH_HASH_SEEN["$path_hash_key"]="$inode"
+        EXIT_REASON="OK"; cleanup_lock; return 0
+      fi
+    fi
+    # -----------------------------------------------------------------------
+
+    # Fallback: vero conflitto → serie "(copy)"
     final_remote="$(_next_copy_dest "$REMOTE_DIR/$filename")"
     if ! two_phase_upload "$local_file" "$final_remote" "$hash" "$inode" "conflict"; then
       log_error "Conflict upload failed: '$filename'"; send_error_mail || true; EXIT_REASON="ERR"; return 1
@@ -587,6 +788,7 @@ handle_file() {
     path_hash_key="${hash}___${filename}"
     PATH_HASH_SEEN["$path_hash_key"]="$inode"
     [[ -n "$file_id" ]] && update_index "$file_id" "$final_remote" "$hash"
+    irs_touch_path "$filename"
     EXIT_REASON="OK"; cleanup_lock; return 0
   fi
 
@@ -602,10 +804,10 @@ handle_file() {
         log_error "Strict-conflict fallback failed: '$filename'"; send_error_mail || true; EXIT_REASON="ERR"; return 1
       fi
       log_info "Strict-conflict fallback copy: '$filename' -> '$(basename "$final_remote")'"
-      # mark processed + index
       path_hash_key="${hash}___${filename}"
       PATH_HASH_SEEN["$path_hash_key"]="$inode"
       [[ -n "$file_id" ]] && update_index "$file_id" "$final_remote" "$hash"
+      irs_touch_path "$filename"
       EXIT_REASON="OK"
       cleanup_lock
       return 0
@@ -620,6 +822,7 @@ handle_file() {
   path_hash_key="${hash}___${filename}"
   if [[ "${PATH_HASH_SEEN[$path_hash_key]:-}" == "$inode" ]]; then EXIT_REASON="SKIP"; cleanup_lock; return 0; fi
   PATH_HASH_SEEN["$path_hash_key"]="$inode"
+  irs_touch_path "$filename"     # <- segna il path alla prima upload “normale”
   [[ -n "$file_id" ]] && update_index "$file_id" "$final_remote" "$hash"
 
   cleanup_lock
@@ -728,23 +931,70 @@ main_loop() {
 
       continue
 
-    elif [[ -f "$FULLPATH" ]]; then
-      # File events
-      [[ -e "$FULLPATH" ]] || { log_debug "Vanished after event: $RELATIVE_PATH"; continue; }
-      local FILE_HASH=""
-      if ! FILE_HASH=$(compute_hash "$FULLPATH"); then
-        log_debug "Hash race for $RELATIVE_PATH"; continue
-      fi
-      local path_hash_key original_pair
-      path_hash_key="${FILE_HASH}___${RELATIVE_PATH}"; original_pair="$path_hash_key"
-      if should_skip_due_to_transform_map "$original_pair"; then continue; fi
-      [[ -e "$FULLPATH" ]] || { log_debug "Vanished before inode read: $RELATIVE_PATH"; continue; }
-      inode=$(get_inode "$FULLPATH"); [[ -z "$inode" ]] && { log_debug "Empty inode (race) for $RELATIVE_PATH"; continue; }
-      if [[ "${PATH_HASH_SEEN[$path_hash_key]:-}" == "$inode" ]]; then
-        log_warning "Skipped: already processed $FULLPATH"; continue
-      fi
-      handle_file "$FULLPATH" "$RELATIVE_PATH" "$inode"
+  elif [[ -f "$FULLPATH" ]]; then
+    # File events
+    [[ -e "$FULLPATH" ]] || { log_debug "Vanished after event: $RELATIVE_PATH"; continue; }
+
+    # Clear debounce state when the final name arrives
+    if [[ "$EVENT" == *"MOVED_TO"* ]]; then
+      unset "FIRST_SEEN[$RELATIVE_PATH]" || true
     fi
+
+    # Debounce: for non-MOVED_TO events, wait a small grace period for a rename
+    if [[ "$EVENT" != *"MOVED_TO"* ]] && (( ${IRS_HOLD_CREATE_SECONDS:-0} > 0 )); then
+      local now first
+      now=$(date +%s)
+      first=${FIRST_SEEN["$RELATIVE_PATH"]:-0}
+      if (( first == 0 )); then
+        FIRST_SEEN["$RELATIVE_PATH"]=$now
+        log_info "hold: first sight of $RELATIVE_PATH on $EVENT → waiting up to ${IRS_HOLD_CREATE_SECONDS}s for rename."
+        continue
+      elif (( now - first < IRS_HOLD_CREATE_SECONDS )); then
+        log_debug "hold: still within grace ($((now-first))s/${IRS_HOLD_CREATE_SECONDS}s) for $RELATIVE_PATH"
+        continue
+      fi
+      # grace expired → proceed
+    fi
+
+    # ZERO-BYTE gate: hold zero-byte files until MOVED_TO (unless explicitly allowed)
+    if (( ${IRS_UPLOAD_ZERO_ON_CREATE:-0} == 0 )) && [[ "$EVENT" != *"MOVED_TO"* ]]; then
+      local sz
+      sz=$(stat -c %s -- "$FULLPATH" 2>/dev/null || echo 0)
+      if (( sz == 0 )); then
+        log_info "hold: zero-byte $RELATIVE_PATH on $EVENT → waiting for rename or >0 content."
+        continue
+      fi
+    fi
+
+    # Compute content hash (race-safe)
+    local FILE_HASH
+    if ! FILE_HASH=$(compute_hash "$FULLPATH"); then
+      log_debug "Hash race for $RELATIVE_PATH"
+      continue
+    fi
+
+    # Transform-map guard (avoid loops after local renames/normalization)
+    local path_hash_key original_pair
+    path_hash_key="${FILE_HASH}___${RELATIVE_PATH}"
+    original_pair="$path_hash_key"
+    if should_skip_due_to_transform_map "$original_pair"; then
+      continue
+    fi
+
+    # Re-check existence before reading inode
+    [[ -e "$FULLPATH" ]] || { log_debug "Vanished before inode read: $RELATIVE_PATH"; continue; }
+
+    inode=$(get_inode "$FULLPATH")
+    [[ -n "$inode" ]] || { log_debug "Empty inode (race) for $RELATIVE_PATH"; continue; }
+
+    # Dedup repeated triggers for same hash+path+inode
+    if [[ "${PATH_HASH_SEEN[$path_hash_key]:-}" == "$inode" ]]; then
+      log_warning "Skipped: already processed $FULLPATH"
+      continue
+    fi
+
+    handle_file "$FULLPATH" "$RELATIVE_PATH" "$inode"
+  fi
   done < <(inotifywait -m -r -e create,close_write,moved_to --format '%w%f:::%e' "$LOCAL_DIR")
 
   log_info "Watch loop terminated unexpectedly"
