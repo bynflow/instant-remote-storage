@@ -24,24 +24,6 @@ IRS_TMP_TTL_SECONDS="${IRS_TMP_TTL_SECONDS:-86400}"
 # 0 = do not alter destination (keep whatever the caller passed)
 IRS_STRICT_CONFLICT="${IRS_STRICT_CONFLICT:-1}"
 
-# Update persistent index if main script functions are available.
-# Use the variables saved in the marker: LOCAL, FINAL_REMOTE, HASH.
-_irs_update_index_if_possible() {
-  # Prevent errors here from triggering the main script's ERR trap
-  set +eE
-  if type -t update_index >/dev/null 2>&1; then
-    if [[ -n "${LOCAL:-}" && -e "$LOCAL" ]]; then
-      local fid
-      fid=$(stat -c '%d:%i:%Z' -- "$LOCAL" 2>/dev/null || echo "")
-      if [[ -n "$fid" && -n "${FINAL_REMOTE:-}" && -n "${HASH:-}" ]]; then
-        update_index "$fid" "$FINAL_REMOTE" "$HASH" || true
-      fi
-    fi
-  fi
-  # Restore -eE (the main script keeps it enabled)
-  set -eE
-}
-
 ensure_state_dirs() {
   mkdir -p "$INFLIGHT_DIR" || true
   # Best-effort: do not fail if remote is currently unavailable
@@ -57,6 +39,8 @@ _marker_path() { # $1=hash  $2=inode
 
 _write_marker() {  # $1=path  $2=status  $3=hash  $4=inode  $5=local  $6=rel  $7=tmp_remote  $8=final_remote
   local p="$1"; shift
+  # make sure parent dir exists (handles runtime deletions of STATE_DIR/INFLIGHT_DIR)
+  mkdir -p -- "$(dirname -- "$p")" 2>/dev/null || true
   {
     printf 'STATUS=%q\n'        "$1"
     printf 'HASH=%q\n'          "$2"
@@ -66,11 +50,7 @@ _write_marker() {  # $1=path  $2=status  $3=hash  $4=inode  $5=local  $6=rel  $7
     printf 'TMP_REMOTE=%q\n'    "$6"
     printf 'FINAL_REMOTE=%q\n'  "$7"
     printf 'STARTED_AT=%q\n'    "$(date +%s)"
-  } > "$p"
-}
-
-_update_marker_status() { # $1=path  $2=status
-  sed -i "s/^STATUS=.*/STATUS=$2/" "$1" 2>/dev/null || true
+  } >"$p" || return 1
 }
 
 # Generic key update for the marker (value is shell-quoted like _write_marker)
@@ -169,7 +149,6 @@ _next_copy_dest() { # $1=absolute remote path
     fi
   done
 
-
   printf '%s\n' "$REMOTE_DIR/$new_rel"
 }
 
@@ -184,6 +163,9 @@ two_phase_upload() {
   local conflict_flag="${5:-}"
   local _tag="${LOG_TAG:-instant-remote-storage}"
 
+  # Ensure state dirs exist even if they were deleted while running (cheap & idempotent)
+  ensure_state_dirs || true
+
   local tmp_remote="$REMOTE_TMP_DIR/${hash}_${inode}.upload"
   local rel="${final_remote#"$REMOTE_DIR/"}"
 
@@ -192,10 +174,13 @@ two_phase_upload() {
     [[ "$(basename "$final_remote")" =~ \(copy ]] && conflict_flag="conflict"
   fi
 
-  # Create marker before starting the copy
+  # Create marker before starting the copy (degraded if it fails)
   local MP
   MP="$(_marker_path "$hash" "$inode")"
-  _write_marker "$MP" "copying" "$hash" "$inode" "$local_file" "$rel" "$tmp_remote" "$final_remote"
+  if ! _write_marker "$MP" "copying" "$hash" "$inode" "$local_file" "$rel" "$tmp_remote" "$final_remote"; then
+    logger -t "$_tag" "[WARNING] Could not create state marker for '$rel' (continuing without crash-safety)"
+    MP=""  # no marker → recovery will be skipped for this upload
+  fi
 
   # Capture rclone progress lines ("Transferred:")
   local TMP_LOG
@@ -206,11 +191,14 @@ two_phase_upload() {
     logger -t "$_tag" "[ERROR] copyto tmp failed: '$rel'"
     awk '/Transferred:/' "$TMP_LOG" | while read -r line; do logger -t "$_tag" "$line"; done || true
     rm -f "$TMP_LOG"
-    return 1  # marker stays → recovery will handle
+    return 1  # marker stays (if present) → recovery will handle
   fi
 
   : > "$TMP_LOG"
-  _update_marker_status "$MP" "uploaded_tmp"
+  # Inline marker update (avoid relying on helper visibility)
+  if [[ -n "$MP" ]]; then
+    sed -i 's/^STATUS=.*/STATUS=uploaded_tmp/' "$MP" 2>/dev/null || true
+  fi
 
   # ---- Last-chance conflict guard (strict by default) -----------------------
   # Even if caller passed "conflict", double-check to avoid overwriting an existing path.
@@ -222,7 +210,7 @@ two_phase_upload() {
         logger -t "$_tag" "[INFO] Conflict fallback: '$rel' exists; promoting tmp to '$(basename "$new_final")'"
         final_remote="$new_final"
         conflict_flag="conflict"
-        _update_marker_kv "$MP" "FINAL_REMOTE" "$final_remote"
+        [[ -n "$MP" ]] && _update_marker_kv "$MP" "FINAL_REMOTE" "$final_remote"
       fi
     fi
   fi
@@ -236,18 +224,15 @@ two_phase_upload() {
     logger -t "$_tag" "[ERROR] moveto tmp→final failed: '$rel'"
     awk '/Transferred:/' "$TMP_LOG" | while read -r line; do logger -t "$_tag" "$line"; done || true
     rm -f "$TMP_LOG"
-    return 1  # marker stays → recovery will handle
+    return 1  # marker stays (if present) → recovery will handle
   fi
   awk '/Transferred:/' "$TMP_LOG" | while read -r line; do logger -t "$_tag" "$line"; done || true
   rm -f "$TMP_LOG"
 
-  # Success: update index (se disponibile) e poi pulisci il marker
-  if [[ -f "$MP" ]]; then
-    # shellcheck source=/dev/null
-    . "$MP" 2>/dev/null || true
-    _irs_update_index_if_possible
+  # Success: clear the marker (index is handled by the main script)
+  if [[ -n "$MP" && -f "$MP" ]]; then
+    _clear_marker "$MP"
   fi
-  _clear_marker "$MP"
   return 0
 }
 
@@ -281,7 +266,6 @@ cleanup_stale_tmp() {
         | select(($mt | length) > 0)
         | ($mt | sub("\\.[0-9]+Z$"; "Z")) as $mt2
         | ($mt2 | fromdateiso8601) as $t
-        | select(($t | type) == "number")
         | select((($now | tonumber) - $t) > ($ttl | tonumber))
         | $name
       ' 2>/dev/null \
@@ -305,53 +289,49 @@ recover_inflight() {
   set +eE
   shopt -s nullglob
   for st in "$INFLIGHT_DIR"/*.state; do
-    # shellcheck source=/dev/null
-    source "$st" 2>/dev/null || continue
-
-    # 1) final exists
-    if rclone lsjson --files-only "$(dirname "$FINAL_REMOTE")" 2>/dev/null \
-      | jq -e --arg n "$(basename "$FINAL_REMOTE")" 'any(.[]; .Name == $n)' >/dev/null; then
-      logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery: final already present → complete: ${REL:-<unknown>}"
+    (
+      # Ogni marker è gestito in una subshell: variabili del marker isolate qui dentro
       # shellcheck source=/dev/null
-      . "$st" 2>/dev/null || true
-      _irs_update_index_if_possible
-      _clear_marker "$st"
-     continue
-    fi
+      source "$st" 2>/dev/null || exit 0
 
-    # 2) tmp exists → promote
-    if rclone lsjson --files-only "$(dirname "$TMP_REMOTE")" 2>/dev/null \
-    | jq -e --arg n "$(basename "$TMP_REMOTE")" 'any(.[]; .Name == $n)' >/dev/null; then
-      logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery: promote tmp → final: ${REL:-<unknown>}"
-      if rclone moveto "$TMP_REMOTE" "$FINAL_REMOTE" >/dev/null 2>&1; then
-        # Update the index and then remove the marker
-        # shellcheck source=/dev/null
-        . "$st" 2>/dev/null || true
-        _irs_update_index_if_possible
-        _clear_marker "$st"
-        logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery ok: ${REL:-<unknown>}"
-      else
-        logger -t "${LOG_TAG:-instant-remote-storage}" "[WARNING] Recovery moveto failed: ${REL:-<unknown>} (marker kept)"
+      # Guard: servono questi campi minimi
+      if [[ -z "${FINAL_REMOTE:-}" || -z "${TMP_REMOTE:-}" || -z "${REL:-}" || -z "${LOCAL:-}" ]]; then
+        logger -t "${LOG_TAG:-instant-remote-storage}" "[WARNING] Recovery: bad marker '$(basename "$st")' (missing keys) — keeping for manual inspection"
+        exit 0
       fi
-      continue
-    fi
 
-    # 3) tmp missing → re-copy and promote
-    logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery: re-copy tmp → final: ${REL:-<unknown>}"
-    if rclone copyto "$LOCAL" "$TMP_REMOTE" >/dev/null 2>&1 && \
-        rclone moveto "$TMP_REMOTE" "$FINAL_REMOTE" >/dev/null 2>&1; then
-        # Update the index and then remove the marker
-        # shellcheck source=/dev/null
-        . "$st" 2>/dev/null || true
-        _irs_update_index_if_possible
+      # 1) final già presente
+      if rclone lsjson --files-only "$(dirname "$FINAL_REMOTE")" 2>/dev/null \
+        | jq -e --arg n "$(basename "$FINAL_REMOTE")" 'any(.[]; .Name == $n)' >/dev/null; then
+        logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery: final already present → complete: ${REL:-<unknown>}"
+        _clear_marker "$st"
+        exit 0
+      fi
+
+      # 2) tmp esiste → promuovi
+      if rclone lsjson --files-only "$(dirname "$TMP_REMOTE")" 2>/dev/null \
+        | jq -e --arg n "$(basename "$TMP_REMOTE")" 'any(.[]; .Name == $n)' >/dev/null; then
+        logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery: promote tmp → final: ${REL:-<unknown>}"
+        if rclone moveto "$TMP_REMOTE" "$FINAL_REMOTE" >/dev/null 2>&1; then
+          _clear_marker "$st"
+          logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery ok: ${REL:-<unknown>}"
+        else
+          logger -t "${LOG_TAG:-instant-remote-storage}" "[WARNING] Recovery moveto failed: ${REL:-<unknown>} (marker kept)"
+        fi
+        exit 0
+      fi
+
+      # 3) tmp mancante → ricopia e promuovi
+      logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery: re-copy tmp → final: ${REL:-<unknown>}"
+      if rclone copyto "$LOCAL" "$TMP_REMOTE" >/dev/null 2>&1 && \
+         rclone moveto "$TMP_REMOTE" "$FINAL_REMOTE" >/dev/null 2>&1; then
         _clear_marker "$st"
         logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] Recovery ok (re-copy): ${REL:-<unknown>}"
-    else
+      else
         logger -t "${LOG_TAG:-instant-remote-storage}" "[WARNING] Recovery failed: ${REL:-<unknown>} (marker kept)"
-    fi
+      fi
+    )
   done
   shopt -u nullglob
   set -eE
 }
-
-cleanup_stale_tmp
