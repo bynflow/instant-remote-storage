@@ -76,13 +76,15 @@ LOCAL_DIR=${LOCAL_DIR:-"$HOME/remote-storage"}
 REMOTE_DIR=${REMOTE_DIR:-"remote:your-remote-directory"}
 
 # Optional wait for remote at bootstrap (default: 0 = best-effort, do not fail)
-IRS_REMOTE_WAIT_SECS=${IRS_REMOTE_WAIT_SECS:-0}
+: "${IRS_REMOTE_WAIT_SECS:=0}"
 
 # State / recovery
 STATE_DIR=${STATE_DIR:-"$HOME/.local/state/instant-remote-storage"}
 INFLIGHT_DIR=${INFLIGHT_DIR:-"$STATE_DIR/inflight"}
 REMOTE_TMP_DIR=${REMOTE_TMP_DIR:-"$REMOTE_DIR/.irs-tmp"}
-IRS_TMP_TTL_SECONDS=${IRS_TMP_TTL_SECONDS:-86400}
+: "${IRS_TMP_TTL_SECONDS:=86400}"
+
+: "${IRS_COLD_START:=0}"
 
 # Index (persistent tracking for renames & content updates)
 INDEX_FILE="${INDEX_FILE:-$STATE_DIR/index.tsv}"
@@ -90,23 +92,26 @@ INDEX_FILE="${INDEX_FILE:-$STATE_DIR/index.tsv}"
 # --- Behavior toggles -------------------------------------------------
 # When the same file-id re-triggers with identical hash AND the canonical remote path,
 # 0 = skip (default); 1 = force creation of a new "(copy ...)" on each identical re-trigger
-IRS_REPEAT_COPY_ON_SAME_HASH=${IRS_REPEAT_COPY_ON_SAME_HASH:-0}
+: "${IRS_REPEAT_COPY_ON_SAME_HASH:=0}"
 
 # Zero-byte upload policy:
 # 1 = eager: upload even on CREATE/CLOSE_WRITE (e.g., `touch` from a shell)
 # 0 = hold : wait for MOVED_TO (final name) or for the file to become >0 bytes [DEFAULT]
-IRS_UPLOAD_ZERO_ON_CREATE=${IRS_UPLOAD_ZERO_ON_CREATE:-0}
+: "${IRS_UPLOAD_ZERO_ON_CREATE:=0}"
 
 # Remote rename toggle (pure renames):
 # 1 = allow server-side rename; 0 = treat renames as new uploads [DEFAULT]
-IRS_ALLOW_REMOTE_RENAME=${IRS_ALLOW_REMOTE_RENAME:-0}
+: "${IRS_ALLOW_REMOTE_RENAME:=0}"
 
 # Empty directories mirroring (CREATE gated by IRS_MIRROR_DIRS_ON_CREATE)
-IRS_MIRROR_EMPTY_DIRS=${IRS_MIRROR_EMPTY_DIRS:-1}
-IRS_MIRROR_DIRS_ON_CREATE=${IRS_MIRROR_DIRS_ON_CREATE:-0}
+: "${IRS_MIRROR_EMPTY_DIRS:=1}"
+: "${IRS_MIRROR_DIRS_ON_CREATE:=0}"
+
+# Hidden dotfiles/directories: 1 = include (default); 0 = exclude entirely
+: "${IRS_INCLUDE_DOTFILES:=1}"
 
 # Debounce for first writes/creates (wait for a rename)
-IRS_HOLD_CREATE_SECONDS=${IRS_HOLD_CREATE_SECONDS:-15}
+: "${IRS_HOLD_CREATE_SECONDS:=10}"
 declare -A FIRST_SEEN=()   # key=RELATIVE_PATH, val=epoch seconds
 
 # shellcheck disable=SC1091
@@ -187,7 +192,7 @@ mkdir -p "$LOCAL_DIR" || { log_error "Failed to create LOCAL_DIR: $LOCAL_DIR"; s
 # Best-effort remote readiness; optional short wait controlled by IRS_REMOTE_WAIT_SECS (default 0)
 set +eE
 rclone mkdir "$REMOTE_DIR" >/dev/null 2>&1 || log_warning "Remote directory may not exist or cannot be created: $REMOTE_DIR"
-WAIT=${IRS_REMOTE_WAIT_SECS:-0}
+WAIT=$IRS_REMOTE_WAIT_SECS
 while ! rclone lsf "$REMOTE_DIR" >/dev/null 2>&1; do
   (( WAIT-- <= 0 )) && { log_warning "Remote '$REMOTE_DIR' not reachable yet (continuing best-effort)"; break; }
   sleep 1
@@ -251,11 +256,23 @@ update_index() { # $1=file_id  $2=remote_path  $3=hash
 }
 
 # === Helpers ===
-get_inode() { [[ -e "$1" ]] && stat --format="%i" "$1" || { log_debug "get_inode: not found: $1"; echo ""; }; }
+get_inode() {
+  if [[ -e "$1" ]]; then
+    if ! stat --format='%i' -- "$1" 2>/dev/null; then
+      log_debug "get_inode: stat failed: $1"
+      echo ""
+    fi
+  else
+    log_debug "get_inode: not found: $1"
+    echo ""
+  fi
+}
+
 get_file_id() {
   if [[ -e "$1" ]]; then
-    stat -c '%d:%i' -- "$1" 2>/dev/null || echo ""
+    stat -c '%d:%i' -- "$1" 2>/dev/null || { log_debug "get_file_id: stat failed: $1"; echo ""; }
   else
+    log_debug "get_file_id: not found: $1"
     echo ""
   fi
 }
@@ -263,7 +280,7 @@ get_file_id() {
 schedule_grace_flush() {
   local rel="$1" full="$2"
   (
-    sleep "${IRS_HOLD_CREATE_SECONDS:-15}"
+    sleep "$IRS_HOLD_CREATE_SECONDS"
     [[ -f "$full" ]] || exit 0
     local sz; sz=$(stat -c %s -- "$full" 2>/dev/null || echo 0)
     (( sz == 0 )) && exit 0
@@ -275,11 +292,11 @@ schedule_grace_flush() {
 }
 
 remote_file_exists() { # $1 = REMOTE_DIR/relpath
-  local dest="$1" parent base
+  local dest="$1" parent base json
   parent="$(dirname "$dest")"
   base="$(basename "$dest")"
-  rclone lsjson --files-only "$parent" 2>/dev/null \
-    | jq -e --arg n "$base" 'any(.[]; .Name == $n)' >/dev/null
+  json="$(rclone lsjson --files-only "$parent" 2>/dev/null || echo "[]")"
+  jq -e --arg n "$base" 'map(select(.Name==$n))|length>0' <<<"$json" >/dev/null
 }
 
 cleanup_lock() {
@@ -291,19 +308,24 @@ cleanup_lock() {
   fi
 }
 
+_try_remote_moveto() {  # _try_remote_moveto <src> <dst>
+  local src="$1" dst="$2"
+  rclone moveto "$src" "$dst" >/dev/null 2>&1
+}
+
 # Returns 0 if ANY segment of the path begins with “.”
 _has_dot_segment() {
   local rel="$1" seg
-  IFS='/' read -r -a segs <<<"$rel"
+  local IFS='/'
+  read -r -a segs <<<"$rel"
   for seg in "${segs[@]}"; do
     [[ "$seg" == .* ]] && return 0
   done
   return 1
 }
-
 _should_skip_dot() {
   # Se l'utente NON vuole dotfile e il path contiene segmenti nascosti → skip
-  (( ${IRS_INCLUDE_DOTFILES:-1} == 0 )) && _has_dot_segment "$1"
+  (( IRS_INCLUDE_DOTFILES == 0 )) && _has_dot_segment "$1"
 }
 
 # Composite extensions to preserve
@@ -442,11 +464,6 @@ log_info "Recovery bootstrap: recover_inflight (done)"
 cleanup_stale_tmp || log_warning "cleanup_stale_tmp best-effort failed"
 set -eE
 
-if _should_skip_dot "$REL_PATH"; then
-  log "[DEBUG]" "Skipped dot path: '$REL_PATH'"
-  continue
-fi
-
 handle_file() {
   local local_file="$1"    # absolute path
   local filename="$2"      # relative path + filename (inside LOCAL_DIR)
@@ -478,7 +495,7 @@ handle_file() {
   [[ -f "$local_file" ]] || { log_debug "File disappeared: '$filename'"; EXIT_REASON="SKIP"; cleanup_lock; return 0; }
 
   # Zero-byte gate
-  if (( ${IRS_UPLOAD_ZERO_ON_CREATE:-0} == 0 )); then
+  if (( IRS_UPLOAD_ZERO_ON_CREATE == 0 )); then
     local fsz
     fsz=$(stat -c %s -- "$local_file" 2>/dev/null || echo 0)
     if (( fsz == 0 )); then
@@ -487,9 +504,9 @@ handle_file() {
     fi
   fi
 
-  # 1) Filter on basename
+  # 1) Filter on basename (temp sempre; dotfile solo se esclusi)
   local bn; bn=$(basename "$filename")
-  if [[ "$bn" =~ ^\.goutputstream || "$bn" =~ \.(swp|part|tmp|bak)$ || "$bn" =~ ^\..* ]]; then
+  if [[ "$bn" =~ ^\.goutputstream || "$bn" =~ \.(swp|part|tmp|bak)$ || ( $IRS_INCLUDE_DOTFILES -eq 0 && "$bn" =~ ^\..* ) ]]; then
     log_warning "Skipped temp/dot: '$filename'"; EXIT_REASON="SKIP"; cleanup_lock; return 0
   fi
 
@@ -565,19 +582,19 @@ handle_file() {
 
   # Remote path canonicalization
   remote_rel_canonical="${parent_dir:+$parent_dir/}$save_filename"
-  remote_path="$REMOTE_DIR/$remote_rel_canonical"
+  remote_path="${REMOTE_DIR%/}/$remote_rel_canonical"
 
   # 4.5) Unchanged vs content-change
   if [[ -n "$file_id" && -n "$idx_remote" && -n "$idx_hash" ]]; then
     if [[ "$idx_hash" == "$hash" ]]; then
-      if [[ "${IRS_COLD_START:-0}" == "1" && "$idx_remote" == "$remote_path" ]]; then
+      if [[ "$IRS_COLD_START" == "1" && "$idx_remote" == "$remote_path" ]]; then
         path_hash_key="${hash}___${filename}"
         PATH_HASH_SEEN["$path_hash_key"]="$inode"
         log_info "Skip unchanged (cold-start same path): '$filename'"
         EXIT_REASON="OK"; cleanup_lock; return 0
       elif [[ "$idx_remote" == "$remote_path" ]]; then
         if remote_file_exists "$remote_path"; then
-          if [[ "${IRS_REPEAT_COPY_ON_SAME_HASH:-0}" == "1" ]]; then
+          if [[ "$IRS_REPEAT_COPY_ON_SAME_HASH" == "1" ]]; then
             local final_remote_copy
             final_remote_copy="$(_next_copy_dest "$remote_path")"
             if ! two_phase_upload "$local_file" "$final_remote_copy" "$hash" "$inode" "repeat-copy"; then
@@ -615,10 +632,10 @@ handle_file() {
   rclone mkdir "$remote_dir_path" >/dev/null 2>&1 || log_warning "Cannot create remote dir: $remote_dir_path"
 
   # 6) Pure rename (optional)
-  if [[ "${IRS_ALLOW_REMOTE_RENAME:-0}" == "1" && -n "$file_id" && -n "$idx_remote" && "$idx_remote" != "$remote_path" && -n "$idx_hash" && "$idx_hash" == "$hash" ]]; then
+  if [[ "$IRS_ALLOW_REMOTE_RENAME" == "1" && -n "$file_id" && -n "$idx_remote" && "$idx_remote" != "$remote_path" && -n "$idx_hash" && "$idx_hash" == "$hash" ]]; then
     log_info "Detected pure rename: '$idx_remote' -> '$remote_path' (no reupload)"
     ensure_remote_dir "$(dirname "$remote_path")" || true
-    if rclone moveto "$idx_remote" "$remote_path" >/dev/null 2>&1; then
+    if _try_remote_moveto "$idx_remote" "$remote_path"; then
       [[ -n "$file_id" ]] && update_index "$file_id" "$remote_path" "$hash"
       EXIT_REASON="OK"; log_info "Remote rename completed: '$filename'"; return 0
     else
@@ -638,12 +655,14 @@ handle_file() {
   fi
 
   # Cold-start size match → skip & index
-  if [[ "${IRS_COLD_START:-0}" == "1" && $remote_exists -eq 0 ]]; then
+  if [[ "$IRS_COLD_START" == "1" && $remote_exists -eq 0 ]]; then
     local local_size
     local_size=$(stat -c%s "$local_file" 2>/dev/null || echo 0)
-    if rclone lsjson --files-only "$(dirname "$remote_path")" 2>/dev/null \
-      | jq -e --arg n "$(basename "$remote_path")" --argjson s "$local_size" \
-           'any(.[]; .Name == $n and ((.Size // -1) == $s))' >/dev/null; then
+    local _json_ls
+    _json_ls="$(rclone lsjson --files-only "$(dirname "$remote_path")" 2>/dev/null || echo '[]')"
+    if jq -e --arg n "$(basename "$remote_path")" --argjson s "$local_size" \
+      'map(select(.Name == $n and ((.Size // -1) == $s))) | length > 0' \
+      <<< "$_json_ls" >/dev/null; then
       log_info "Skip unchanged (cold-start size match): '$(basename "$remote_rel_canonical")'"
       path_hash_key="${hash}___${filename}"
       PATH_HASH_SEEN["$path_hash_key"]="$inode"
@@ -706,7 +725,13 @@ cold_start_rescan() {
     inode=$(get_inode "$f"); [[ -z "$inode" ]] && continue
     log_debug "Cold-start: requeue $relfile"
     handle_file "$f" "$relfile" "$inode" || log_warning "Cold-start failed on $relfile"
-  done < <(find "$LOCAL_DIR" -type f -not -path '*/.*' -print0)
+  done < <(
+    if (( IRS_INCLUDE_DOTFILES == 1 )); then
+      find "$LOCAL_DIR" -type f -print0
+    else
+      find "$LOCAL_DIR" -type f -not -path '*/.*' -print0
+    fi
+  )
 }
 
 # Cold-start pass (skip unchanged regardless of computed path)
@@ -743,9 +768,15 @@ main_loop() {
       BN=$(basename "$RELATIVE_PATH")
       log_debug "Event '$EVENT' -> $RELATIVE_PATH"
 
-      # Skip temp/hidden patterns
-      if [[ "$BN" =~ ^\.goutputstream || "$BN" =~ \.(swp|part|tmp|bak)$ || "$BN" =~ ^\..* ]]; then
+      # Always skip temp; dotfiles only if excluded
+      if [[ "$BN" =~ ^\.goutputstream || "$BN" =~ \.(swp|part|tmp|bak)$ || ( $IRS_INCLUDE_DOTFILES -eq 0 && "$BN" =~ ^\..* ) ]]; then
         log_warning "Skipped early in main_loop: $RELATIVE_PATH"
+        continue
+      fi
+
+      # If you exclude dotfiles, do not traverse paths with hidden segments (.folders)
+      if (( IRS_INCLUDE_DOTFILES == 0 )) && _has_dot_segment "$RELATIVE_PATH"; then
+        log_warning "Skipped hidden path: $RELATIVE_PATH"
         continue
       fi
 
@@ -768,7 +799,15 @@ main_loop() {
           RELFILE="${FILE#"$LOCAL_DIR"/}"
           inode=$(get_inode "$FILE"); [[ -z "$inode" ]] && continue
           handle_file "$FILE" "$RELFILE" "$inode"
-        done < <( { find "$FULLPATH" -type f -print0 2>/dev/null || true; } )
+        done < <(
+          { 
+              if (( IRS_INCLUDE_DOTFILES == 1 )); then
+                find "$FULLPATH" -type f -print0 2>/dev/null
+              else
+                find "$FULLPATH" -type f -not -path '*/.*' -print0 2>/dev/null
+              fi
+          } || true
+        )
         continue
 
       elif [[ -f "$FULLPATH" ]]; then
@@ -780,7 +819,7 @@ main_loop() {
         fi
 
         # Debounce provisional names
-        if [[ "$EVENT" != *"MOVED_TO"* ]] && (( ${IRS_HOLD_CREATE_SECONDS:-0} > 0 )); then
+        if [[ "$EVENT" != *"MOVED_TO"* ]] && (( IRS_HOLD_CREATE_SECONDS > 0 )); then
           if [[ "$BN" != .* && "$BN" == *.* ]]; then
             unset "FIRST_SEEN[$RELATIVE_PATH]" || true
           else
@@ -804,7 +843,7 @@ main_loop() {
         fi
 
         # Zero-byte gate
-        if (( ${IRS_UPLOAD_ZERO_ON_CREATE:-0} == 0 )); then
+        if (( IRS_UPLOAD_ZERO_ON_CREATE == 0 )); then
           local sz
           sz=$(stat -c %s -- "$FULLPATH" 2>/dev/null || echo 0)
           if (( sz == 0 )); then

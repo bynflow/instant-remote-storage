@@ -19,6 +19,10 @@ INFLIGHT_DIR="${INFLIGHT_DIR:-$STATE_DIR/inflight}"
 REMOTE_TMP_DIR="${REMOTE_TMP_DIR:-$REMOTE_DIR/.irs-tmp}"
 IRS_TMP_TTL_SECONDS="${IRS_TMP_TTL_SECONDS:-86400}"
 
+# Normalize remote roots (avoid trailing '/')
+_irs_remote_root="${REMOTE_DIR%/}"
+_irs_tmp_root="${REMOTE_TMP_DIR%/}"
+
 # Conflict fallback behavior:
 # 1 = if the final destination exists, promote tmp to a "(copy)" name instead of overwriting
 # 0 = do not alter destination (keep whatever the caller passed)
@@ -26,8 +30,7 @@ IRS_STRICT_CONFLICT="${IRS_STRICT_CONFLICT:-1}"
 
 ensure_state_dirs() {
   mkdir -p "$INFLIGHT_DIR" || true
-  # Best-effort: do not fail if remote is currently unavailable
-  rclone mkdir "$REMOTE_TMP_DIR" >/dev/null 2>&1 || true
+  rclone mkdir "$_irs_tmp_root" >/dev/null 2>&1 || true
 }
 
 # Marker helpers
@@ -111,7 +114,7 @@ _normalize_final_path() {  # $1=absolute remote path
 # with a "(copy)" suffix that does not collide. Prints the new path to stdout.
 _next_copy_dest() { # $1=absolute remote path
   local dest="$1"
-  local rel="${dest#"$REMOTE_DIR/"}"
+  local rel="${dest#"${_irs_remote_root}/"}"
   local split base ext dotext
   split="$(_split_base_ext_rel "$rel")"
   if [[ "$split" == *":::"* ]]; then
@@ -126,14 +129,14 @@ _next_copy_dest() { # $1=absolute remote path
   local base_dir base_name new_base_name new_rel parent_for_check
   base_dir="$(dirname "$base")"
   base_name="$(basename "$base")"
-  new_base_name="${base_name}-(copy)"
+  new_base_name="${base_name} (copy)"
 
   if [[ "$base_dir" == "." ]]; then
     new_rel="${new_base_name}${dotext}"
-    parent_for_check="$REMOTE_DIR"
+    parent_for_check="$_irs_remote_root"
   else
     new_rel="${base_dir}/${new_base_name}${dotext}"
-    parent_for_check="$REMOTE_DIR/$base_dir"
+    parent_for_check="$_irs_remote_root/$base_dir"
   fi
 
   # increment until free
@@ -141,7 +144,7 @@ _next_copy_dest() { # $1=absolute remote path
   while rclone lsjson --files-only "$parent_for_check" 2>/dev/null \
     | jq -e --arg n "${new_base_name}${dotext}" 'any(.[]; .Name == $n)' >/dev/null; do
     count=$((count + 1))
-    new_base_name="${base_name}-(copy ${count})"
+    new_base_name="${base_name} (copy ${count})"
     if [[ "$base_dir" == "." ]]; then
       new_rel="${new_base_name}${dotext}"
     else
@@ -149,7 +152,7 @@ _next_copy_dest() { # $1=absolute remote path
     fi
   done
 
-  printf '%s\n' "$REMOTE_DIR/$new_rel"
+  printf '%s\n' "$_irs_remote_root/$new_rel"
 }
 
 # two_phase_upload LOCAL_FILE FINAL_REMOTE HASH INODE [CONFLICT_FLAG]
@@ -166,8 +169,8 @@ two_phase_upload() {
   # Ensure state dirs exist even if they were deleted while running (cheap & idempotent)
   ensure_state_dirs || true
 
-  local tmp_remote="$REMOTE_TMP_DIR/${hash}_${inode}.upload"
-  local rel="${final_remote#"$REMOTE_DIR/"}"
+  local tmp_remote="$_irs_tmp_root/${hash}_${inode}.upload"
+  local rel="${final_remote#"${_irs_remote_root}/"}"
 
   # Auto-detect label if not provided
   if [[ -z "$conflict_flag" ]]; then
@@ -237,7 +240,7 @@ two_phase_upload() {
 }
 
 cleanup_stale_tmp() {
-  local now ts mp age
+  local now ts mp age orphan
   now=$(date +%s)
 
   # --- GC local markers (best-effort) ---------------------------------------
@@ -255,10 +258,10 @@ cleanup_stale_tmp() {
 
   # --- GC orphan remote tmp files (best-effort, never fatal) -----------------
   set +eE  # do not let errors here kill the daemon
-  if rclone lsf "$REMOTE_TMP_DIR" >/dev/null 2>&1; then
+  if rclone lsf "$_irs_tmp_root" >/dev/null 2>&1; then
     # Some backends don’t expose ModTime; we skip those entries
-    rclone lsjson "$REMOTE_TMP_DIR" 2>/dev/null \
-    | jq -r --arg now "$(date -u +%s)" --arg ttl "$IRS_TMP_TTL_SECONDS" '
+    rclone lsjson "$_irs_tmp_root" 2>/dev/null \
+    | jq -r -j --arg now "$(date -u +%s)" --arg ttl "$IRS_TMP_TTL_SECONDS" '
         .[]
         | select((.IsDir // false) | not)
         | (.Path // .Name) as $name
@@ -267,14 +270,20 @@ cleanup_stale_tmp() {
         | ($mt | sub("\\.[0-9]+Z$"; "Z")) as $mt2
         | ($mt2 | fromdateiso8601) as $t
         | select((($now | tonumber) - $t) > ($ttl | tonumber))
-        | $name
-      ' 2>/dev/null \
-    | while IFS= read -r orphan; do
+        | ($name + "\u0000")
+    ' 2>/dev/null \
+    | while IFS= read -r -d '' orphan; do
         [[ -n "$orphan" ]] || continue
-        rclone deletefile "$REMOTE_TMP_DIR/$orphan" >/dev/null 2>&1 && \
-          logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] GC: deleted stale remote tmp '$orphan'" || \
+        orphan="${orphan##/}"
+        orphan="${orphan#./}"
+        [[ -z "$orphan" || "$orphan" == "." || "$orphan" == ".." ]] && continue
+
+        if rclone deletefile -- "$_irs_tmp_root/$orphan" >/dev/null 2>&1; then
+          logger -t "${LOG_TAG:-instant-remote-storage}" "[INFO] GC: deleted stale remote tmp '$orphan'"
+        else
           logger -t "${LOG_TAG:-instant-remote-storage}" "[WARNING] GC: failed to delete remote tmp '$orphan'"
-      done
+        fi
+    done
   else
     logger -t "${LOG_TAG:-instant-remote-storage}" "[DEBUG] GC: remote tmp dir missing/unreachable, skipping"
   fi
