@@ -34,70 +34,135 @@ _tmp_path_for() {
 
 # --- Compute a non-colliding "(copy)" destination for a remote file ------------
 # Produces: "name-(copy).ext", then "name-(copy 2).ext", ...
-_next_copy_dest() {
-  # $1 = preferred remote path (e.g. "$REMOTE_DIR/path/to/file.ext")
-  local dst="$1" parent base name ext candidate i
-  parent="$(dirname "$dst")"
-  base="$(basename "$dst")"
+# _next_copy_dest() {
+#   # $1 = preferred remote path (e.g. "$REMOTE_DIR/path/to/file.ext")
+#   local dst="$1" parent base name ext candidate i
+#   parent="$(dirname "$dst")"
+#   base="$(basename "$dst")"
 
-#   # split base into name + extension (preserve last dot; composite exts handled by main)
-#   if [[ "$base" == .* || "$base" != *.* ]]; then
-#     name="$base"
-#     ext=""
+# #   # split base into name + extension (preserve last dot; composite exts handled by main)
+# #   if [[ "$base" == .* || "$base" != *.* ]]; then
+# #     name="$base"
+# #     ext=""
+# #   else
+# #     name="${base%.*}"
+# #     ext=".${base##*.}"
+# #   fi
+#   # split base into name + extension (dotfile-aware; composite exts handled by main)
+#   if [[ "$base" == .* ]]; then
+#     # dotfile: if there is another dot, consider the last part as an extension
+#     if [[ "$base" == *.*.* ]]; then
+#       name="${base%.*}"           # eg.: ".cogl.txt" -> ".cogl"
+#       ext=".${base##*.}"          #                 -> ".txt"
+#     else
+#       name="$base"                # eg.: ".bashrc" → no ext
+#       ext=""
+#     fi
 #   else
-#     name="${base%.*}"
-#     ext=".${base##*.}"
+#     if [[ "$base" == *.* ]]; then
+#       name="${base%.*}"
+#       ext=".${base##*.}"
+#     else
+#       name="$base"
+#       ext=""
+#     fi
 #   fi
-  # split base into name + extension (dotfile-aware; composite exts handled by main)
-  if [[ "$base" == .* ]]; then
-    # dotfile: if there is another dot, consider the last part as an extension
-    if [[ "$base" == *.*.* ]]; then
-      name="${base%.*}"           # eg.: ".cogl.txt" -> ".cogl"
-      ext=".${base##*.}"          #                 -> ".txt"
-    else
-      name="$base"                # eg.: ".bashrc" → no ext
-      ext=""
-    fi
-  else
-    if [[ "$base" == *.* ]]; then
-      name="${base%.*}"
-      ext=".${base##*.}"
-    else
-      name="$base"
-      ext=""
-    fi
-  fi
 
-  # If it already ends with "-(copy)" or "-(copy N)", start incrementing from N+1
-  local suffix="-(copy)"
-  local count_start=1
-  if [[ "$name" =~ ^(.+)-\(copy\)$ ]]; then
-    name="${BASH_REMATCH[1]}"; count_start=2
-  elif [[ "$name" =~ ^(.+)-\(copy\ ([0-9]+)\)$ ]]; then
-    name="${BASH_REMATCH[1]}"; count_start=$(( BASH_REMATCH[2] + 1 ))
-  fi
+#   # If it already ends with "-(copy)" or "-(copy N)", start incrementing from N+1
+#   local suffix="-(copy)"
+#   local count_start=1
+#   if [[ "$name" =~ ^(.+)-\(copy\)$ ]]; then
+#     name="${BASH_REMATCH[1]}"; count_start=2
+#   elif [[ "$name" =~ ^(.+)-\(copy\ ([0-9]+)\)$ ]]; then
+#     name="${BASH_REMATCH[1]}"; count_start=$(( BASH_REMATCH[2] + 1 ))
+#   fi
 
-  # Preload sibling names once
-  local siblings_json
-  siblings_json="$(rclone lsjson --files-only "$parent" 2>/dev/null)" || siblings_json="[]"
+#   # Preload sibling names once
+#   local siblings_json
+#   siblings_json="$(rclone lsjson --files-only "$parent" 2>/dev/null)" || siblings_json="[]"
 
-  # First try plain "-(copy)"
-  candidate="$parent/${name}${suffix}${ext}"
-  if ! jq -e --arg n "$(basename "$candidate")" 'any(.[]; .Name == $n)' >/dev/null 2>&1 <<<"$siblings_json"; then
-    printf '%s\n' "$candidate"; return 0
-  fi
+#   # First try plain "-(copy)"
+#   candidate="$parent/${name}${suffix}${ext}"
+#   if ! jq -e --arg n "$(basename "$candidate")" 'any(.[]; .Name == $n)' >/dev/null 2>&1 <<<"$siblings_json"; then
+#     printf '%s\n' "$candidate"; return 0
+#   fi
 
-  # Then "-(copy N)"
-  for (( i=count_start; i<=9999; i++ )); do
-    candidate="$parent/${name}-(${suffix#-(} ${i})${ext}"   # builds "-(copy N)"
-    if ! jq -e --arg n "$(basename "$candidate")" 'any(.[]; .Name == $n)' >/dev/null 2>&1 <<<"$siblings_json"; then
-      printf '%s\n' "$candidate"; return 0
+#   # Then "-(copy N)"
+#   for (( i=count_start; i<=9999; i++ )); do
+#     candidate="$parent/${name}-(${suffix#-(} ${i})${ext}"   # builds "-(copy N)"
+#     if ! jq -e --arg n "$(basename "$candidate")" 'any(.[]; .Name == $n)' >/dev/null 2>&1 <<<"$siblings_json"; then
+#       printf '%s\n' "$candidate"; return 0
+#     fi
+#   done
+
+#   # Fallback (should never happen)
+#   printf '%s\n' "$parent/${name}-copy-${RANDOM}${ext}"
+#   return 0
+# }
+
+# Returns a free remote path with suffix (copy):
+#   nome-(copia).ext, nome-(copia 2).ext, ...
+_next_copy_dest() { # $1 = full remote path, es: "$REMOTE_DIR/path/name.ext"
+  local dest="$1"
+  local dir base stem ext ce found=0
+
+  dir="$(dirname -- "$dest")"
+  base="$(basename -- "$dest")"
+
+  # --- robust name splitting (supports composite extensions and dotfiles) ---
+  for ce in "${composite_exts[@]}"; do
+    if [[ "$base" == *.${ce} ]]; then
+      stem="${base%."$ce"}"
+      ext="$ce"
+      found=1
+      break
     fi
   done
+  if [[ $found -eq 0 ]]; then
+    if [[ "$base" == .* ]]; then
+      # dotfile: ".foo" / ".foo.txt"
+      local stem_no_dot="${base#.}"
+      if [[ "$stem_no_dot" == *.* ]]; then
+        stem=".${stem_no_dot%.*}"
+        ext="${stem_no_dot##*.}"
+      else
+        stem="$base"
+        ext=""
+      fi
+    else
+      if [[ "$base" == *.* ]]; then
+        stem="${base%.*}"
+        ext="${base##*.}"
+      else
+        stem="$base"
+        ext=""
+      fi
+    fi
+  fi
 
-  # Fallback (should never happen)
-  printf '%s\n' "$parent/${name}-copy-${RANDOM}${ext}"
-  return 0
+  # first candidate
+  local cand
+  if [[ -n "$ext" ]]; then
+    cand="${stem}-(copy).${ext}"
+  else
+    cand="${stem}-(copy)"
+  fi
+
+  # increase: (copy 2), (copy 3), ...
+  if remote_file_exists "$dir/$cand"; then
+    local n=2
+    while true; do
+      if [[ -n "$ext" ]]; then
+        cand="${stem}-(copy ${n}).${ext}"
+      else
+        cand="${stem}-(copy ${n})"
+      fi
+      remote_file_exists "$dir/$cand" || break
+      ((n++))
+    done
+  fi
+
+  printf '%s/%s\n' "$dir" "$cand"
 }
 
 # --- Two-phase upload with crash-safe recovery --------------------------------
