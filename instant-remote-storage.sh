@@ -89,7 +89,7 @@ IRS_MIRROR_EMPTY_DIRS=${IRS_MIRROR_EMPTY_DIRS:-1}
 # Remote rename toggle for pure renames (default: disabled)
 IRS_ALLOW_REMOTE_RENAME=${IRS_ALLOW_REMOTE_RENAME:-0}
 # Also mirror empty dirs on raw CREATE (besides MOVED_TO)
-IRS_MIRROR_DIRS_ON_CREATE=${IRS_MIRROR_DIRS_ON_CREATE:-0}
+IRS_MIRROR_DIRS_ON_CREATE=${IRS_MIRROR_DIRS_ON_CREATE:-1}
 # Zero-byte upload policy:
 # 1 = eager: upload even on CREATE/CLOSE_WRITE (touch uploads immediately)
 # 0 = hold: wait for MOVED_TO (final name) or when file becomes >0 bytes
@@ -602,21 +602,31 @@ fi
         log_info "Skip unchanged (cold-start): '$filename'"
         EXIT_REASON="OK"; cleanup_lock; return 0
       elif [[ "$idx_remote" == "$remote_path" ]]; then
-        # Always-copy ONLY if the target path already exists remotely.
+        # # Always-copy ONLY if the target path already exists remotely.
+        # if remote_file_exists "$remote_path"; then
+        #   local final_remote_copy
+        #   final_remote_copy="$(_next_copy_dest "$REMOTE_DIR/$filename")"
+        #   if ! two_phase_upload "$local_file" "$final_remote_copy" "$hash" "$inode" "repeat-copy"; then
+        #     log_error "Repeat-copy upload failed: '$filename'"; send_error_mail || true; EXIT_REASON="ERR"; cleanup_lock; return 1
+        #   fi
+        #   log_info "Repeat-copy completed: '$filename' -> '$(basename "$final_remote_copy")'"
+        #   path_hash_key="${hash}___${filename}"
+        #   PATH_HASH_SEEN["$path_hash_key"]="$inode"
+        #   [[ -n "$file_id" ]] && update_index "$file_id" "$final_remote_copy" "$hash"
+        #   EXIT_REASON="OK"; cleanup_lock; return 0
+        # else
+        #   log_debug "Repeat-copy bypassed: remote does not contain '$remote_path' yet"
+        #   # fall-through to normal upload
+        # fi
         if remote_file_exists "$remote_path"; then
-          local final_remote_copy
-          final_remote_copy="$(_next_copy_dest "$REMOTE_DIR/$filename")"
-          if ! two_phase_upload "$local_file" "$final_remote_copy" "$hash" "$inode" "repeat-copy"; then
-            log_error "Repeat-copy upload failed: '$filename'"; send_error_mail || true; EXIT_REASON="ERR"; cleanup_lock; return 1
-          fi
-          log_info "Repeat-copy completed: '$filename' -> '$(basename "$final_remote_copy")'"
+          # Idempotent: already loaded → index and skip (no copy)
           path_hash_key="${hash}___${filename}"
           PATH_HASH_SEEN["$path_hash_key"]="$inode"
-          [[ -n "$file_id" ]] && update_index "$file_id" "$final_remote_copy" "$hash"
+          [[ -n "$file_id" ]] && update_index "$file_id" "$remote_path" "$hash"
+          log_info "Skip unchanged: already present remotely — '$filename'"
           EXIT_REASON="OK"; cleanup_lock; return 0
         else
-          log_debug "Repeat-copy bypassed: remote does not contain '$remote_path' yet"
-          # fall-through to normal upload
+          log_debug "Unchanged but remote missing → proceed to normal upload"
         fi
       fi
     fi
@@ -895,14 +905,38 @@ main_loop() {
       fi
 
       # Process files within the directory (be tolerant to races)
-      while IFS= read -r -d '' FILE; do
-        [[ -e "$FILE" ]] || { log_debug "Vanished after scan: ${FILE#"$LOCAL_DIR"/}"; continue; }
-        local RELFILE
-        RELFILE="${FILE#"$LOCAL_DIR"/}"
-        inode=$(get_inode "$FILE"); [[ -z "$inode" ]] && continue
-        handle_file "$FILE" "$RELFILE" "$inode"
-      done < <( { find "$FULLPATH" -type f -print0 2>/dev/null || true; } )
-      continue
+    #   while IFS= read -r -d '' FILE; do
+    #     [[ -e "$FILE" ]] || { log_debug "Vanished after scan: ${FILE#"$LOCAL_DIR"/}"; continue; }
+    #     local RELFILE
+    #     RELFILE="${FILE#"$LOCAL_DIR"/}"
+    #     inode=$(get_inode "$FILE"); [[ -z "$inode" ]] && continue
+    #     handle_file "$FILE" "$RELFILE" "$inode"
+    #   done < <( { find "$FULLPATH" -type f -print0 2>/dev/null || true; } )
+    while IFS= read -r -d '' FILE; do
+      [[ -e "$FILE" ]] || { log_debug "Vanished after scan: $RELFILE"; continue; }
+
+      local RELFILE FILE_HASH path_hash_key original_pair
+      RELFILE="${FILE#"$LOCAL_DIR"/}"
+
+      # Dedup come nel percorso eventi file
+      if ! FILE_HASH=$(compute_hash "$FILE"); then
+        log_debug "Hash race during dir-scan for $RELFILE"; continue
+      fi
+      path_hash_key="${FILE_HASH}___${RELFILE}"
+      original_pair="$path_hash_key"
+      if should_skip_due_to_transform_map "$original_pair"; then
+        continue
+      fi
+
+      inode=$(get_inode "$FILE"); [[ -z "$inode" ]] && continue
+      if [[ "${PATH_HASH_SEEN[$path_hash_key]:-}" == "$inode" ]]; then
+        log_warning "Skipped (dir-scan dedup): already processed $FILE"
+        continue
+      fi
+
+      handle_file "$FILE" "$RELFILE" "$inode"
+    done < <( { find "$FULLPATH" -type f -print0 2>/dev/null || true; } )
+    continue
 
     elif [[ -f "$FULLPATH" ]]; then
       # === Zero-byte policy gating (event-based, language-agnostic) ===
