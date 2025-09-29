@@ -294,6 +294,12 @@ is_tar_lz4() { command -v lz4   >/dev/null 2>&1 && lz4   -cd -- "$1" 2>/dev/null
 assign_extension() {
   local file_path="$1"
   local original_name; original_name=$(basename "$file_path")
+  
+#   # Do not normalize dotfiles: keep the name as it is
+#   if [[ "$original_name" == .* ]]; then
+#     printf '%s\n' "$original_name"
+#     return 42
+#   fi
 
   # Preserve known composite extensions
   for ext in "${composite_exts[@]}"; do
@@ -303,19 +309,52 @@ assign_extension() {
   done
 
   local mime; mime=$(get_mime "$file_path")
+#   if [[ -z "$mime" ]]; then
+#     log_warning "MIME detection failed. Keeping original name."; printf '%s\n' "$original_name"; return 42
+#   fi
   if [[ -z "$mime" ]]; then
-    log_warning "MIME detection failed. Keeping original name."; printf '%s\n' "$original_name"; return 42
+    log_warning "MIME detection failed. Keeping original name."
+    printf '%s\n' "$original_name"
+    return 0   # <— before it was `return 42`
   fi
   local ext="${MIME_EXTENSIONS[$mime]:-}"
   if [[ -z "$ext" ]]; then
-    log_warning "MIME '$mime' not mapped. Keeping original name."; printf '%s\n' "$original_name"; return 42
+    log_warning "MIME '$mime' not mapped. Keeping original name."
+    printf '%s\n' "$original_name"
+    return 0   # <— before it was `return 42`
   fi
 
+#   local ext="${MIME_EXTENSIONS[$mime]:-}"
+#   if [[ -z "$ext" ]]; then
+#     log_warning "MIME '$mime' not mapped. Keeping original name."; printf '%s\n' "$original_name"; return 42
+#   fi
+
+#   local name_wo_ext cur_ext
+#   if [[ "$original_name" == *.* && "$original_name" != .* ]]; then
+#     name_wo_ext="${original_name%.*}"; cur_ext="${original_name##*.}"
+#   else
+#     name_wo_ext="$original_name"; cur_ext=""
+#   fi
+
+# --- Robust extension extraction also for dotfiles ------------------------
   local name_wo_ext cur_ext
-  if [[ "$original_name" == *.* && "$original_name" != .* ]]; then
-    name_wo_ext="${original_name%.*}"; cur_ext="${original_name##*.}"
+  if [[ "$original_name" == .* ]]; then
+    local stem="${original_name#.}"
+    if [[ "$stem" == *.* ]]; then
+      name_wo_ext=".${stem%.*}"
+      cur_ext="${stem##*.}"
+    else
+      name_wo_ext="$original_name"
+      cur_ext=""
+    fi
   else
-    name_wo_ext="$original_name"; cur_ext=""
+    if [[ "$original_name" == *.* ]]; then
+      name_wo_ext="${original_name%.*}"
+      cur_ext="${original_name##*.}"
+    else
+      name_wo_ext="$original_name"
+      cur_ext=""
+    fi
   fi
 
   # If current extension already matches the canonical one
@@ -343,6 +382,13 @@ assign_extension() {
 clean_name() {
   local file_path="$1"
   local original_name; original_name=$(basename "$file_path")
+  # Do not slugify dotfiles: preserve the original name
+  if [[ "$original_name" == .* ]]; then
+    echo "$original_name"
+    return 0
+  fi
+
+
   local base full_ext found=0
   for ext in "${composite_exts[@]}"; do
     if [[ "$original_name" == *.${ext} ]]; then
@@ -435,11 +481,18 @@ handle_file() {
     log_info "'$filename' is not stable yet — will retry later"; EXIT_REASON="SKIP"; cleanup_lock; return 0; fi
   [[ -f "$local_file" ]] || { log_debug "File disappeared: '$filename'"; EXIT_REASON="SKIP"; cleanup_lock; return 0; }
 
-  # 1) Filter on basename
-  local bn; bn=$(basename "$filename")
-  if [[ "$bn" =~ ^\.goutputstream || "$bn" =~ \.(swp|part|tmp|bak)$ || "$bn" =~ ^\..* ]]; then
-    log_warning "Skipped temp/dot: '$filename'"; EXIT_REASON="SKIP"; cleanup_lock; return 0
-  fi
+## 1) Filter on basename
+#   local bn; bn=$(basename "$filename")
+#   if [[ "$bn" =~ ^\.goutputstream || "$bn" =~ \.(swp|part|tmp|bak)$ || "$bn" =~ ^\..* ]]; then
+#     log_warning "Skipped temp/dot: '$filename'"; EXIT_REASON="SKIP"; cleanup_lock; return 0
+#   fi
+# 1) Filter on basename (only known temps; accept dotfiles)
+local bn; bn=$(basename "$filename")
+if [[ "$bn" =~ ^\.goutputstream || "$bn" =~ \.(swp|part|tmp|bak)$ ]]; then
+  log_warning "Skipped temp: '$filename'"
+  EXIT_REASON="SKIP"; cleanup_lock; return 0
+fi
+
 
   # 2) Hash + per-event lock
   local hash; hash=$(compute_hash "$local_file")
@@ -573,8 +626,35 @@ handle_file() {
     fi
   fi
 
-  # 8) Conflict policy (copy if the remote name is already taken by another file_id)
+#   # 8) Conflict policy (copy if the remote name is already taken by another file_id)
+#   if [[ $remote_exists -eq 0 && ( -z "$file_id" || "${INDEX_REMOTE_PATH[$file_id]:-}" != "$remote_path" ) ]]; then
+#     final_remote="$(_next_copy_dest "$REMOTE_DIR/$filename")"
+#     if ! two_phase_upload "$local_file" "$final_remote" "$hash" "$inode" "conflict"; then
+#       log_error "Conflict upload failed: '$filename'"; send_error_mail || true; EXIT_REASON="ERR"; return 1
+#     fi
+#     log_info "Conflict upload completed: '$filename' -> '$(basename "$final_remote")'"
+#     path_hash_key="${hash}___${filename}"
+#     PATH_HASH_SEEN["$path_hash_key"]="$inode"
+#     [[ -n "$file_id" ]] && update_index "$file_id" "$final_remote" "$hash"
+#     EXIT_REASON="OK"; cleanup_lock; return 0
+#   fi
+# 8) Conflict policy (copy if the remote name is already taken by another file_id)
   if [[ $remote_exists -eq 0 && ( -z "$file_id" || "${INDEX_REMOTE_PATH[$file_id]:-}" != "$remote_path" ) ]]; then
+    # --- Idempotent fast path: if the remote has the SAME SIZE as the local,
+    #     we consider the file already uploaded → index and STOP (no copy).
+    local local_size
+    local_size=$(stat -c%s "$local_file" 2>/dev/null || echo 0)
+    if rclone lsjson --files-only "$(dirname "$remote_path")" 2>/dev/null \
+      | jq -e --arg n "$(basename "$remote_path")" --argjson s "$local_size" \
+         'any(.[]; .Name == $n and ((.Size // -1) == $s))' >/dev/null; then
+      log_info "Idempotenza: remoto identico per '$remote_path' → indicizzo senza upload"
+      path_hash_key="${hash}___${filename}"
+      PATH_HASH_SEEN["$path_hash_key"]="$inode"
+      [[ -n "$file_id" ]] && update_index "$file_id" "$remote_path" "$hash"
+      EXIT_REASON="OK"; cleanup_lock; return 0
+    fi
+
+    # Otherwise, it is a real conflict → create a copy
     final_remote="$(_next_copy_dest "$REMOTE_DIR/$filename")"
     if ! two_phase_upload "$local_file" "$final_remote" "$hash" "$inode" "conflict"; then
       log_error "Conflict upload failed: '$filename'"; send_error_mail || true; EXIT_REASON="ERR"; return 1
@@ -643,7 +723,8 @@ cold_start_rescan() {
 
     log_debug "Cold-start: requeue $relfile"
     handle_file "$f" "$relfile" "$inode" || log_warning "Cold-start failed on $relfile"
-  done < <(find "$LOCAL_DIR" -type f -not -path '*/.*' -print0)
+#   done < <(find "$LOCAL_DIR" -type f -not -path '*/.*' -print0)
+    done < <(find "$LOCAL_DIR" -type f -print0)
 }
 
 # Cold-start pass (skip unchanged regardless of computed path)
@@ -681,11 +762,18 @@ main_loop() {
     log_debug "Event '$EVENT' -> $RELATIVE_PATH"
     BN=$(basename "$RELATIVE_PATH")
 
-    # Skip temp/hidden patterns
-    if [[ "$BN" =~ ^\.goutputstream || "$BN" =~ \.(swp|part|tmp|bak)$ || "$BN" =~ ^\..* ]]; then
+    # # Skip temp/hidden patterns
+    # if [[ "$BN" =~ ^\.goutputstream || "$BN" =~ \.(swp|part|tmp|bak)$ || "$BN" =~ ^\..* ]]; then
+    #   log_warning "Skipped early in main_loop: $RELATIVE_PATH"
+    #   continue
+    # fi
+
+    # Skip solo file temporanei noti (NON scartare i dotfile)
+    if [[ "$BN" =~ ^\.goutputstream || "$BN" =~ \.(swp|part|tmp|bak)$ ]]; then
       log_warning "Skipped early in main_loop: $RELATIVE_PATH"
       continue
     fi
+
 
     # Directory events
     if [[ -d "$FULLPATH" ]]; then

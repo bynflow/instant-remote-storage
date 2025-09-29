@@ -40,13 +40,32 @@ _next_copy_dest() {
   parent="$(dirname "$dst")"
   base="$(basename "$dst")"
 
-  # split base into name + extension (preserve last dot; composite exts handled by main)
-  if [[ "$base" == .* || "$base" != *.* ]]; then
-    name="$base"
-    ext=""
+#   # split base into name + extension (preserve last dot; composite exts handled by main)
+#   if [[ "$base" == .* || "$base" != *.* ]]; then
+#     name="$base"
+#     ext=""
+#   else
+#     name="${base%.*}"
+#     ext=".${base##*.}"
+#   fi
+  # split base into name + extension (dotfile-aware; composite exts handled by main)
+  if [[ "$base" == .* ]]; then
+    # dotfile: if there is another dot, consider the last part as an extension
+    if [[ "$base" == *.*.* ]]; then
+      name="${base%.*}"           # eg.: ".cogl.txt" -> ".cogl"
+      ext=".${base##*.}"          #                 -> ".txt"
+    else
+      name="$base"                # eg.: ".bashrc" → no ext
+      ext=""
+    fi
   else
-    name="${base%.*}"
-    ext=".${base##*.}"
+    if [[ "$base" == *.* ]]; then
+      name="${base%.*}"
+      ext=".${base##*.}"
+    else
+      name="$base"
+      ext=""
+    fi
   fi
 
   # If it already ends with "-(copy)" or "-(copy N)", start incrementing from N+1
