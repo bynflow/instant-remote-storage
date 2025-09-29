@@ -444,7 +444,19 @@ should_skip_due_to_transform_map() {
   return 1
 }
 
-ensure_remote_dir() { local dir="$1"; rclone mkdir "$dir" >/dev/null 2>&1 || { log_warning "Cannot ensure remote dir: $dir"; return 1; }; }
+# ensure_remote_dir() { local dir="$1"; rclone mkdir "$dir" >/dev/null 2>&1 || { log_warning "Cannot ensure remote dir: $dir"; return 1; }; }
+
+ensure_remote_dir() {
+  local dir="$1"
+
+  # Do not create directories during cold boot/read-only scans
+  if [[ "${IRS_SUPPRESS_DIR_CREATE:-}" == "1" ]]; then
+    log_debug "mkdir suppressed: $dir"
+    return 0
+  fi
+
+  rclone mkdir "$dir" >/dev/null 2>&1
+}
 
 # === Load persistent index ===
 load_index
@@ -622,9 +634,11 @@ fi
     fi
   fi
 
-  # 5) Ensure remote dir exists
-  local remote_dir_path; remote_dir_path=$(dirname "$remote_path")
-  rclone mkdir "$remote_dir_path" >/dev/null 2>&1 || log_warning "Cannot create remote dir: $remote_dir_path"
+#   # 5) Ensure remote dir exists
+#   local remote_dir_path; remote_dir_path=$(dirname "$remote_path")
+#   rclone mkdir "$remote_dir_path" >/dev/null 2>&1 || log_warning "Cannot create remote dir: $remote_dir_path"
+# 5) (removed) — we only create directories when needed (two_phase_upload / remote rename)
+:
 
   # 6) Handle pure rename (same file-id, same hash, different remote path)
   if [[ "${IRS_ALLOW_REMOTE_RENAME:-0}" == "1" && -n "$file_id" && -n "$idx_remote" && "$idx_remote" != "$remote_path" && -n "$idx_hash" && "$idx_hash" == "$hash" ]]; then
@@ -638,8 +652,10 @@ fi
     fi
   fi
 
-  # 7) Cold-start preflight (must run BEFORE conflict policy)
-  ensure_remote_dir "$(dirname "$remote_path")" || true
+#   # 7) Cold-start preflight (must run BEFORE conflict policy)
+#   ensure_remote_dir "$(dirname "$remote_path")" || true
+# 7) Cold-start preflight: no preventive mkdir; checks use lsjson and secure fallback
+:
 
   # Check remote existence once and reuse the result
   local remote_exists
@@ -746,24 +762,62 @@ on_interrupt() { log_warning "Interrupted. Exiting..."; exit 0; }  # clean exit 
 trap 'on_exit' EXIT
 trap 'on_interrupt' INT TERM HUP
 
+# cold_start_rescan() {
+#   while IFS= read -r -d '' f; do
+#     local relfile inode fh
+#     relfile="${f#"$LOCAL_DIR"/}"
+#     inode=$(get_inode "$f"); [[ -z "$inode" ]] && continue
+
+#     # align with watcher path/hash scheme (dedup/transform-map)
+#     if fh=$(compute_hash "$f"); then
+#       path_hash_key="${fh}___${relfile}"
+#       original_pair="$path_hash_key"
+#     else
+#       log_warning "Cold-start hash failed: $relfile"
+#     fi
+
+#     log_debug "Cold-start: requeue $relfile"
+#     handle_file "$f" "$relfile" "$inode" || log_warning "Cold-start failed on $relfile"
+# #   done < <(find "$LOCAL_DIR" -type f -not -path '*/.*' -print0)
+#     done < <(find "$LOCAL_DIR" -type f -print0)
+# }
+
+# cold_start_rescan() {
+#   log_info "Cold-start rescan (start);"
+
+#   # During cold start, we do not want to create directories on the remote server.
+#   export IRS_SUPPRESS_DIR_CREATE=1
+
+#   # Scan all local FILES (including those in dotdir), excluding the temporary area.
+#   # Note: we do not touch directories -> no accidental mkdir.
+#   local f rel
+#   while IFS= read -r -d '' f; do
+#     # path relative to LOCAL_DIR (as expected by handle_file)
+#     rel="${f#$LOCAL_DIR/}"
+#     log_debug "Cold-start: requeue $rel"
+#     # handle_file "$rel" "coldstart" || log_warning "Cold start: handle_file failed for: $rel"
+#     handle_file "$f" "$rel" "$inode" || log_warning "Cold start: handle_file failed for: $rel"
+#   done < <(find "$LOCAL_DIR" -mindepth 1 -type f ! -path "$LOCAL_DIR/.irs-tmp/*" -print0)
+
+#   unset IRS_SUPPRESS_DIR_CREATE
+#   log_info "Cold-start rescan (done);"
+# }
+
 cold_start_rescan() {
+  log_info "Cold-start rescan (start);"
+  export IRS_SUPPRESS_DIR_CREATE=1
+
+  local root="${LOCAL_DIR%/}"   # normalize: without trailing slash
+  local f rel inode
   while IFS= read -r -d '' f; do
-    local relfile inode fh
-    relfile="${f#"$LOCAL_DIR"/}"
+    rel="${f#"$root"/}"
     inode=$(get_inode "$f"); [[ -z "$inode" ]] && continue
+    log_debug "Cold-start: requeue $rel"
+    handle_file "$f" "$rel" "$inode" || log_warning "Cold-start: handle_file fallito per: $rel"
+  done < <(find "$LOCAL_DIR" -mindepth 1 -type f ! -path "$LOCAL_DIR/.irs-tmp/*" -print0)
 
-    # align with watcher path/hash scheme (dedup/transform-map)
-    if fh=$(compute_hash "$f"); then
-      path_hash_key="${fh}___${relfile}"
-      original_pair="$path_hash_key"
-    else
-      log_warning "Cold-start hash failed: $relfile"
-    fi
-
-    log_debug "Cold-start: requeue $relfile"
-    handle_file "$f" "$relfile" "$inode" || log_warning "Cold-start failed on $relfile"
-#   done < <(find "$LOCAL_DIR" -type f -not -path '*/.*' -print0)
-    done < <(find "$LOCAL_DIR" -type f -print0)
+  unset IRS_SUPPRESS_DIR_CREATE
+  log_info "Cold-start rescan (done);"
 }
 
 # Cold-start pass (skip unchanged regardless of computed path)
@@ -816,17 +870,28 @@ main_loop() {
 
     # Directory events
     if [[ -d "$FULLPATH" ]]; then
-      # Mirror directories on MOVED_TO (final name) and/or CREATE (toggle)
-      if [[ "$IRS_MIRROR_EMPTY_DIRS" == "1" && ( "$EVENT" == *"MOVED_TO"* || ( "$IRS_MIRROR_DIRS_ON_CREATE" == "1" && "$EVENT" == *"CREATE"* ) ) ]]; then
-        local SUBPATH
-        SUBPATH="${FULLPATH#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
-        rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1 || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
+    #   # Mirror directories on MOVED_TO (final name) and/or CREATE (toggle)
+    #   if [[ "$IRS_MIRROR_EMPTY_DIRS" == "1" && ( "$EVENT" == *"MOVED_TO"* || ( "$IRS_MIRROR_DIRS_ON_CREATE" == "1" && "$EVENT" == *"CREATE"* ) ) ]]; then
+    #     local SUBPATH
+    #     SUBPATH="${FULLPATH#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
+    #     rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1 || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
 
-        # Ensure any currently-empty subdirs inside it exist remotely
-        while IFS= read -r -d '' DIR; do
-          SUBPATH="${DIR#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
-          rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1 || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
-        done < <( { find "$FULLPATH" -mindepth 1 -type d -empty -print0 2>/dev/null || true; } )
+    #     # Ensure any currently-empty subdirs inside it exist remotely
+    #     while IFS= read -r -d '' DIR; do
+    #       SUBPATH="${DIR#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
+    #       rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1 || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
+    #     done < <( { find "$FULLPATH" -mindepth 1 -type d -empty -print0 2>/dev/null || true; } )
+    #   fi
+    # Replica l’intero scheletro di directory (incluse quelle NON vuote)
+      if [[ "$IRS_MIRROR_EMPTY_DIRS" == "1" && ( "$EVENT" == *"MOVED_TO"* || ( "$IRS_MIRROR_DIRS_ON_CREATE" == "1" && "$EVENT" == *"CREATE"* ) ) ]]; then
+        if [[ "${IRS_SUPPRESS_DIR_CREATE:-0}" != "1" ]]; then
+          while IFS= read -r -d '' d; do
+            SUBPATH="${d#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
+            ensure_remote_dir "$REMOTE_DIR/$SUBPATH" || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
+          done < <(find "$FULLPATH" -type d -print0 2>/dev/null)
+        else
+          log_debug "mkdir suppressed per skeleton di '$RELATIVE_PATH'"
+        fi
       fi
 
       # Process files within the directory (be tolerant to races)
