@@ -94,6 +94,8 @@ IRS_MIRROR_DIRS_ON_CREATE=${IRS_MIRROR_DIRS_ON_CREATE:-0}
 # 1 = eager: upload even on CREATE/CLOSE_WRITE (touch uploads immediately)
 # 0 = hold: wait for MOVED_TO (final name) or when file becomes >0 bytes
 IRS_UPLOAD_ZERO_ON_CREATE=${IRS_UPLOAD_ZERO_ON_CREATE:-0}
+# Grace period to avoid interfering with user renaming (seconds)
+IRS_LOCAL_RENAME_GRACE=${IRS_LOCAL_RENAME_GRACE:-5}
 
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib/irs_recovery.sh"
@@ -525,22 +527,59 @@ fi
   elif [[ "$assign_exit_code" -ne 0 || -z "$new_filename" ]]; then
     log_error "assign_extension failed for '$filename' (code: $assign_exit_code)"; send_error_mail || true; cleanup_lock; EXIT_REASON="ERR"; return 1
   fi
+#   save_filename=$(clean_name "$new_filename")
+#   if [[ "$save_filename" != "$(basename "$filename")" ]]; then
+#     local parent_dir; parent_dir=$(dirname "$filename")
+#     if [[ "$local_file" != "$LOCAL_DIR/$parent_dir/$save_filename" ]]; then
+#       filename="$parent_dir/$save_filename"; filename="${filename#./}"
+#       path_hash_key="${hash}___${filename}"
+#       transformed_pair="$path_hash_key"; FILENAME_TRANSFORM_MAP["$transformed_pair"]="$original_pair"
+#       if [[ "${PATH_HASH_SEEN[$path_hash_key]:-}" == "$inode" ]]; then EXIT_REASON="SKIP"; cleanup_lock; return 0; fi
+#       PATH_HASH_SEEN["$path_hash_key"]="$inode"
+#       if ! mv "$local_file" "$LOCAL_DIR/$parent_dir/$save_filename"; then
+#         unset "PATH_HASH_SEEN[$path_hash_key]"; log_error "Local rename failed: '$filename'"; send_error_mail || true; cleanup_lock; EXIT_REASON="ERR"; return 1
+#       fi
+#       local_file="$LOCAL_DIR/$filename"
+#     fi
+#   fi
+#   remote_path="$REMOTE_DIR/$filename"
+
   save_filename=$(clean_name "$new_filename")
+  # Build the remote name (even if different from the local one, if we return the mv)
+  local parent_dir; parent_dir=$(dirname "$filename")
+  local remote_rel="$filename"
   if [[ "$save_filename" != "$(basename "$filename")" ]]; then
-    local parent_dir; parent_dir=$(dirname "$filename")
-    if [[ "$local_file" != "$LOCAL_DIR/$parent_dir/$save_filename" ]]; then
-      filename="$parent_dir/$save_filename"; filename="${filename#./}"
-      path_hash_key="${hash}___${filename}"
-      transformed_pair="$path_hash_key"; FILENAME_TRANSFORM_MAP["$transformed_pair"]="$original_pair"
-      if [[ "${PATH_HASH_SEEN[$path_hash_key]:-}" == "$inode" ]]; then EXIT_REASON="SKIP"; cleanup_lock; return 0; fi
-      PATH_HASH_SEEN["$path_hash_key"]="$inode"
-      if ! mv "$local_file" "$LOCAL_DIR/$parent_dir/$save_filename"; then
-        unset "PATH_HASH_SEEN[$path_hash_key]"; log_error "Local rename failed: '$filename'"; send_error_mail || true; cleanup_lock; EXIT_REASON="ERR"; return 1
+    remote_rel="$parent_dir/$save_filename"; remote_rel="${remote_rel#./}"
+
+    # Rename locally ONLY if the file is “older” than the grace period;
+    # otherwise postpone to avoid breaking the rename from the file manager.
+    local now ctime age
+    now=$(date +%s); ctime=$(stat -c %Z -- "$local_file" 2>/dev/null || echo 0)
+    age=$(( now - ctime ))
+    if (( age >= ${IRS_LOCAL_RENAME_GRACE:-5} )); then
+      local target="$LOCAL_DIR/$remote_rel"
+      if [[ "$local_file" != "$target" ]]; then
+        local new_pair="${hash}___${remote_rel}"
+        transformed_pair="$new_pair"; FILENAME_TRANSFORM_MAP["$new_pair"]="$original_pair"
+        if [[ "${PATH_HASH_SEEN[$new_pair]:-}" == "$inode" ]]; then
+          EXIT_REASON="SKIP"; cleanup_lock; return 0
+        fi
+        PATH_HASH_SEEN["$new_pair"]="$inode"
+        if ! mv -- "$local_file" "$target"; then
+          unset "PATH_HASH_SEEN[$new_pair]"
+          log_error "Local rename failed: '$filename'"; send_error_mail || true
+          cleanup_lock; EXIT_REASON="ERR"; return 1
+        fi
+        filename="$remote_rel"
+        local_file="$target"
       fi
-      local_file="$LOCAL_DIR/$filename"
+    else
+      log_debug "Deferring local rename ${age}s < grace ${IRS_LOCAL_RENAME_GRACE:-5}s: keep '$filename', remote uses '$remote_rel'"
     fi
   fi
-  remote_path="$REMOTE_DIR/$filename"
+
+  # ALWAYS use the normalized name for the remote path, even if the local mv is postponed.
+  remote_path="$REMOTE_DIR/${remote_rel}"
 
   # 4.5) Unchanged vs content-change (based on persistent index)
   if [[ -n "$file_id" && -n "$idx_remote" && -n "$idx_hash" ]]; then
