@@ -102,6 +102,7 @@ _tmp_path_for() {
 
 # Returns a free remote path with suffix (copy):
 #   nome-(copia).ext, nome-(copia 2).ext, ...
+# shellcheck disable=SC2154  # composite_exts is defined in the main script
 _next_copy_dest() { # $1 = full remote path, es: "$REMOTE_DIR/path/name.ext"
   local dest="$1"
   local dir base stem ext ce found=0
