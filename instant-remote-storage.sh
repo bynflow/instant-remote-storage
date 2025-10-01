@@ -419,6 +419,39 @@ clean_name() {
   if [[ -n "$full_ext" ]]; then echo "${clean_base}.${full_ext,,}"; else echo "$clean_base"; fi
 }
 
+maybe_local_normalize() { # $1=local_file(abs) $2=old_rel $3=new_rel $4=hash $5=inode
+  local local_file="$1"; local old_rel="$2"; local new_rel="$3"; local hash="$4"; local inode="$5"
+  local old_bn new_bn target now mtime age
+  old_bn="$(basename -- "$old_rel")"
+  new_bn="$(basename -- "$new_rel")"
+  # Niente da fare se il nome è già quello "pulito"
+  [[ "$old_bn" == "$new_bn" ]] && return 0
+
+  # Rispetta il grace: rinomina solo se il file è “fermo” da un po’
+  now=$(date +%s); mtime=$(stat -c %Y -- "$local_file" 2>/dev/null || echo 0); age=$(( now - mtime ))
+  if (( age < ${IRS_LOCAL_RENAME_GRACE:-5} )); then
+    log_debug "Local normalize: defer (mtime age ${age}s < grace ${IRS_LOCAL_RENAME_GRACE:-5}s) for '$old_rel'"
+    return 0
+  fi
+
+  target="$LOCAL_DIR/$new_rel"
+  if [[ -e "$target" ]]; then
+    log_warning "Local normalize skipped: target exists '$new_rel'"
+    return 0
+  fi
+
+  mkdir -p -- "$(dirname -- "$target")" 2>/dev/null || true
+  local new_pair="${hash}___${new_rel}" old_pair="${hash}___${old_rel}"
+  if mv -- "$local_file" "$target"; then
+    FILENAME_TRANSFORM_MAP["$new_pair"]="$old_pair"
+    PATH_HASH_SEEN["$new_pair"]="$inode"
+    unset 'PATH_HASH_SEEN[$old_pair]'
+    log_info "Local normalize: '$old_rel' -> '$new_rel'"
+  else
+    log_warning "Local normalize failed: '$old_rel' -> '$new_rel'"
+  fi
+}
+
 wait_for_stable_file() {
   local file="$1"; local retries=1000; local interval=0.5; local last_size=-1; local size
   for ((i=0; i<retries; i++)); do
@@ -668,6 +701,8 @@ fi
       ensure_remote_dir "$(dirname -- "$remote_path")" || true
       if rclone moveto -- "$idx_remote" "$remote_path" >/dev/null 2>&1; then
         update_index "$file_id" "$remote_path" "$hash"
+        local rr="${remote_rel:-${remote_path#"$REMOTE_DIR/"}}"
+        maybe_local_normalize "$local_file" "$filename" "$rr" "$hash" "$inode" || true
         EXIT_REASON="OK"; log_info "Remote rename completed: '$filename'"; return 0
       else
         log_warning "Remote rename failed; will fallback to upload"
@@ -678,7 +713,7 @@ fi
     local dev_inode
     dev_inode="$(stat -c '%d:%i' -- "$local_file" 2>/dev/null || echo '')"
     if [[ -n "$dev_inode" ]]; then
-      local found_fid="" found_src="" newest_fid="" newest_src="" newest_ctime=0
+      local found_fid="" newest_fid="" newest_ctime=0
 
       # (1) Preferisci l'entry il cui path remoto ESISTE davvero
       for fid in "${!INDEX_REMOTE_PATH[@]}"; do
@@ -686,30 +721,35 @@ fi
         [[ "${INDEX_HASH[$fid]:-}" == "$hash" ]] || continue  # stesso contenuto
         local src="${INDEX_REMOTE_PATH[$fid]}"
         if remote_file_exists "$src"; then
-          found_fid="$fid"; found_src="$src"
+          found_fid="$fid"
           break
         fi
         # Traccia anche la più recente per fallback (se nessun path esiste)
         local ctime_part="${fid##*:}"
         if [[ "$ctime_part" =~ ^[0-9]+$ ]] && (( ctime_part > newest_ctime )); then
-          newest_ctime="$ctime_part"; newest_fid="$fid"; newest_src="$src"
+          newest_ctime="$ctime_part"; newest_fid="$fid"
         fi
       done
 
       # (2) Nessun path esistente? Usa la più recente (best-effort)
       if [[ -z "$found_fid" && -n "$newest_fid" ]]; then
-        found_fid="$newest_fid"; found_src="$newest_src"
+        found_fid="$newest_fid"
       fi
 
-      if [[ -n "$found_fid" && -n "$found_src" && "$found_src" != "$remote_path" ]]; then
-        log_info "Detected pure rename (ctime changed): '$found_src' -> '$remote_path' (no reupload)"
-        ensure_remote_dir "$(dirname -- "$remote_path")" || true
-        if rclone moveto -- "$found_src" "$remote_path" >/dev/null 2>&1; then
-          unset 'INDEX_REMOTE_PATH[$found_fid]'; unset 'INDEX_HASH[$found_fid]'
-          update_index "$file_id" "$remote_path" "$hash"
-          EXIT_REASON="OK"; log_info "Remote rename completed (dev:inode fallback): '$filename'"; return 0
-        else
-          log_warning "Remote rename (dev:inode fallback) failed; will fallback to upload"
+      if [[ -n "$found_fid" ]]; then
+        local src="${INDEX_REMOTE_PATH[$found_fid]}"
+        if [[ -n "$src" && "$src" != "$remote_path" ]]; then
+          log_info "Detected pure rename (ctime changed): '$src' -> '$remote_path' (no reupload)"
+          ensure_remote_dir "$(dirname -- "$remote_path")" || true
+          if rclone moveto -- "$src" "$remote_path" >/dev/null 2>&1; then
+            unset 'INDEX_REMOTE_PATH[$found_fid]'; unset 'INDEX_HASH[$found_fid]'
+            update_index "$file_id" "$remote_path" "$hash"
+            local rr="${remote_rel:-${remote_path#"$REMOTE_DIR/"}}"
+            maybe_local_normalize "$local_file" "$filename" "$rr" "$hash" "$inode" || true
+            EXIT_REASON="OK"; log_info "Remote rename completed (dev:inode fallback): '$filename'"; return 0
+          else
+            log_warning "Remote rename (dev:inode fallback) failed; will fallback to upload"
+          fi
         fi
       fi
     fi
@@ -782,6 +822,8 @@ fi
     path_hash_key="${hash}___${filename}"
     PATH_HASH_SEEN["$path_hash_key"]="$inode"
     [[ -n "$file_id" ]] && update_index "$file_id" "$final_remote" "$hash"
+    local final_remote_rel="${final_remote#"$REMOTE_DIR/"}"
+    maybe_local_normalize "$local_file" "$filename" "$final_remote_rel" "$hash" "$inode" || true
     EXIT_REASON="OK"; cleanup_lock; return 0
   fi
 
@@ -800,6 +842,8 @@ fi
       path_hash_key="${hash}___${filename}"
       PATH_HASH_SEEN["$path_hash_key"]="$inode"
       [[ -n "$file_id" ]] && update_index "$file_id" "$final_remote" "$hash"
+      local final_remote_rel="${final_remote#"$REMOTE_DIR/"}"
+      maybe_local_normalize "$local_file" "$filename" "$final_remote_rel" "$hash" "$inode" || true
       EXIT_REASON="OK"; cleanup_lock; return 0
     else
       log_error "Upload failed (rc=$rc): '$filename'"; send_error_mail || true; EXIT_REASON="ERR"; return 1
@@ -813,6 +857,8 @@ fi
   if [[ "${PATH_HASH_SEEN[$path_hash_key]:-}" == "$inode" ]]; then EXIT_REASON="SKIP"; cleanup_lock; return 0; fi
   PATH_HASH_SEEN["$path_hash_key"]="$inode"
   [[ -n "$file_id" ]] && update_index "$file_id" "$final_remote" "$hash"
+  local final_remote_rel="${final_remote#"$REMOTE_DIR/"}"
+  maybe_local_normalize "$local_file" "$filename" "$final_remote_rel" "$hash" "$inode" || true
 
   cleanup_lock
   EXIT_REASON="OK"; log_debug "handle_file end: '$filename'"; return 0
