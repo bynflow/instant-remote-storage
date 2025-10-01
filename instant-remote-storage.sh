@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ========================================
-# instant-remote-storage - v3.7.0
+# instant-remote-storage - v4.2.0
 # Author : Carlo Capobianchi (bynflow)
 # GitHub : https://github.com/bynflow
-# Last Modified: 2025-09-16
+# Last Modified: 2025-09-30
 # ========================================
 # Watches a local directory (LOCAL_DIR) and uploads files to a remote (REMOTE_DIR)
 # using rclone. Features:
