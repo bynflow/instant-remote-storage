@@ -1,3 +1,22 @@
+instant-remote-storage (4.2.0-2) unstable; urgency=medium
+
+  * Rebuild: Lintian cleanups; packaging-only.
+
+ -- Carlo Capobianchi <bynrflow@gmail.com>  Fri, 03 Oct 2025 00:22:23 +0200
+
+instant-remote-storage (4.2.0-2) unstable; urgency=medium
+
+  * Rebuild: Lintian cleanups; packaging-only.
+
+ -- Carlo Capobianchi <bynrflow@gmail.com>  Thu, 02 Oct 2025 23:45:25 +0200
+
+instant-remote-storage (4.2.0-2) unstable; urgency=medium
+
+  * Rebuild: fix Lintian (packaging-only); adjust Standards-Version to
+    4.6.2.
+
+ -- Carlo Capobianchi <bynrflow@gmail.com>  Thu, 02 Oct 2025 23:45:11 +0200
+
 instant-remote-storage (4.2.0-1) unstable; urgency=medium
 
   * New upstream release 4.2.0; README aggiornato; Known issues.

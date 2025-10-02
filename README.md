@@ -134,6 +134,103 @@ Recovery helper (`lib/irs_recovery.sh`):
 
 ---
 
+## Error email notifications (optional)
+
+Enable Instant Remote Storage (IRS) to send a short report by **email** whenever a fatal/irrecoverable error is detected (e.g., upload failure after retries, corrupted temp, recovery failed).
+
+### Requirements
+
+* A working local mailer in `$PATH` (`mail`, `mailx`, `s-nail`, `msmtp`, or a `sendmail`-compatible MTA).
+* If you prefer direct SMTP, configure **msmtp** (example below).
+
+### Quick setup (in `.env`)
+
+Add these variables to your profile’s `.env`:
+
+```bash
+# Who receives error notifications
+IRS_ERROR_MAIL_TO="you@example.com"
+
+# Optional overrides
+IRS_ERROR_MAIL_FROM="irs@$(hostname -f)"          # envelope/from header
+IRS_ERROR_MAIL_SUBJECT="[IRS] Error on %HOST% (%PROFILE%)"  # placeholders expanded by the script
+
+# Mailer command that reads the message on stdin; default auto-detects mail/mailx
+IRS_ERROR_MAILER="mail -a 'From: ${IRS_ERROR_MAIL_FROM}'"
+```
+
+**Notes**
+
+* Keep `%HOST%` and `%PROFILE%` as-is; the script expands them at send time.
+* If `IRS_ERROR_MAILER` is **unset**, the script tries to use `mail`/`mailx` automatically.
+* The mailer must accept a subject flag (e.g. `-s` for `mail|mailx`) **or** a precomposed header mode like `msmtp -t`.
+
+### Apply and test
+
+After editing the `.env` for your profile (typically `/etc/instant-remote-storage/irs.env`):
+
+**If you installed via the Debian package (default):**
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart instant-remote-storage@<profile>
+```
+
+**If you run it as a user service:**
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart instant-remote-storage@<profile>
+```
+
+*Tip:* `systemctl status instant-remote-storage@<profile>` → if `Loaded:` shows `/lib/systemd/system/...`, it’s the **system** service; if it shows `~/.config/systemd/user` or `/usr/lib/systemd/user`, it’s the **user** service.
+
+### What the email contains
+
+* Exit reason and failing step
+* Local path, inode, size; content hash if known
+* Recent log tail and short recovery hints
+
+### Disable emails
+
+Leave `IRS_ERROR_MAIL_TO` **empty** or **unset**.
+
+### Example: msmtp (SMTP relay)
+
+Configure **msmtp**:
+
+```ini
+# ~/.config/msmtp/config
+account default
+host smtp.example.com
+port 587
+auth on
+user youruser
+passwordeval "secret-tool lookup service irs smtp youruser"
+tls on
+tls_trust_file /etc/ssl/certs/ca-certificates.crt
+from you@example.com
+logfile ~/.local/state/msmtp/msmtp.log
+```
+
+Then in your `.env`:
+
+```bash
+IRS_ERROR_MAILER="msmtp -t"
+IRS_ERROR_MAIL_FROM="you@example.com"  # used for From: header when composing
+```
+
+When `msmtp -t` is detected, the script composes proper `To:`, `From:`, and `Subject:` headers.
+
+### Troubleshooting
+
+* Check the service logs:
+  `journalctl --user -u instant-remote-storage@<profile> -b`
+* For msmtp, inspect:
+  `~/.local/state/msmtp/msmtp.log`
+* Ensure the `.env` (if it holds credentials) is protected:
+  `chmod 600 .env`
+
 ## Behavior details
 
 * **No overwrite:** if a remote path already exists, uploads go to a `(copy)` name.
@@ -179,7 +276,10 @@ Recovery helper (`lib/irs_recovery.sh`):
 Follow logs via systemd journal:
 
 ```bash
-journalctl -u instant-remote-storage@<user> -f
+# System unit (predefinito con questo pacchetto)
+journalctl -u instant-remote-storage@<profile> -f
+# Se qualcuno usa una user unit:
+# journalctl --user -u instant-remote-storage@<profile> -f
 ```
 
 ---
