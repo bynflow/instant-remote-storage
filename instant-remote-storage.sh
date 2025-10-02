@@ -91,12 +91,12 @@ IRS_ALLOW_REMOTE_RENAME=${IRS_ALLOW_REMOTE_RENAME:-1}
 # Also mirror empty dirs on raw CREATE (besides MOVED_TO)
 IRS_MIRROR_DIRS_ON_CREATE=${IRS_MIRROR_DIRS_ON_CREATE:-1}
 # Zero-byte upload policy:
-# 1 = eager: carica anche file a 0B, ma SOLO dopo il breve grace su CREATE (evita “senza nome”)
-# 0 = hold: se a 0B, resta in hold finché arriva MOVED_TO o il file > 0B
+# 1 = eager: also upload 0B files, but ONLY after the short grace on CREATE (avoids “untitled”)
+# 0 = hold: if 0B, keep on hold until MOVED_TO arrives or the file becomes > 0B
 IRS_UPLOAD_ZERO_ON_CREATE=${IRS_UPLOAD_ZERO_ON_CREATE:-1}
 # Grace period to avoid interfering with user renaming (seconds)
 IRS_LOCAL_RENAME_GRACE=${IRS_LOCAL_RENAME_GRACE:-5}
-# Grace period (seconds) to wait for the final rename on-place
+# Grace period (seconds) to wait for the final on-place rename
 IRS_DIR_CREATE_GRACE=${IRS_DIR_CREATE_GRACE:-10}
 IRS_FILE_CREATE_GRACE=${IRS_FILE_CREATE_GRACE:-10}
 
@@ -424,10 +424,10 @@ maybe_local_normalize() { # $1=local_file(abs) $2=old_rel $3=new_rel $4=hash $5=
   local old_bn new_bn target now mtime age
   old_bn="$(basename -- "$old_rel")"
   new_bn="$(basename -- "$new_rel")"
-  # Niente da fare se il nome è già quello "pulito"
+  # Nothing to do if the name is already the “clean” one
   [[ "$old_bn" == "$new_bn" ]] && return 0
 
-  # Rispetta il grace: rinomina solo se il file è “fermo” da un po’
+  # Respect the grace: rename only if the file has been “still” for a while
   now=$(date +%s); mtime=$(stat -c %Y -- "$local_file" 2>/dev/null || echo 0); age=$(( now - mtime ))
   if (( age < ${IRS_LOCAL_RENAME_GRACE:-5} )); then
     log_debug "Local normalize: defer (mtime age ${age}s < grace ${IRS_LOCAL_RENAME_GRACE:-5}s) for '$old_rel'"
@@ -687,15 +687,15 @@ fi
     fi
   fi
 
-#   # 5) Ensure remote dir exists
-#   local remote_dir_path; remote_dir_path=$(dirname "$remote_path")
-#   rclone mkdir "$remote_dir_path" >/dev/null 2>&1 || log_warning "Cannot create remote dir: $remote_dir_path"
-# 5) (removed) — we only create directories when needed (two_phase_upload / remote rename)
-:
+  #   # 5) Ensure remote dir exists
+  #   local remote_dir_path; remote_dir_path=$(dirname "$remote_path")
+  #   rclone mkdir "$remote_dir_path" >/dev/null 2>&1 || log_warning "Cannot create remote dir: $remote_dir_path"
+  # 5) (removed) — we only create directories when needed (two_phase_upload / remote rename)
+  :
 
-  # 6) Handle pure rename (robusto ai rename che aggiornano il ctime)
+  # 6) Handle pure rename (robust to renames that update ctime)
   if [[ "${IRS_ALLOW_REMOTE_RENAME:-0}" == "1" ]]; then
-    # Fast path: stesso file_id in index (ctime invariato) → semplice moveto
+    # Fast path: same file_id in index (ctime unchanged) → simple moveto
     if [[ -n "$file_id" && -n "$idx_remote" && -n "$idx_hash" && "$idx_hash" == "$hash" && "$idx_remote" != "$remote_path" ]]; then
       log_info "Detected pure rename: '$idx_remote' -> '$remote_path' (no reupload)"
       ensure_remote_dir "$(dirname -- "$remote_path")" || true
@@ -709,29 +709,29 @@ fi
       fi
     fi
 
-    # Fallback: ctime cambiato → cerca in index per "dev:inode" (ignorando il :ctime)
+    # Fallback: ctime changed → look up in index by "dev:inode" (ignoring :ctime)
     local dev_inode
     dev_inode="$(stat -c '%d:%i' -- "$local_file" 2>/dev/null || echo '')"
     if [[ -n "$dev_inode" ]]; then
       local found_fid="" newest_fid="" newest_ctime=0
 
-      # (1) Preferisci l'entry il cui path remoto ESISTE davvero
+      # (1) Prefer the entry whose remote path REALLY EXISTS
       for fid in "${!INDEX_REMOTE_PATH[@]}"; do
-        [[ "$fid" == "$dev_inode:"* ]] || continue            # match prefisso dev:inode:
-        [[ "${INDEX_HASH[$fid]:-}" == "$hash" ]] || continue  # stesso contenuto
+        [[ "$fid" == "$dev_inode:"* ]] || continue            # match prefix dev:inode:
+        [[ "${INDEX_HASH[$fid]:-}" == "$hash" ]] || continue  # same content
         local src="${INDEX_REMOTE_PATH[$fid]}"
         if remote_file_exists "$src"; then
           found_fid="$fid"
           break
         fi
-        # Traccia anche la più recente per fallback (se nessun path esiste)
+        # Track also the most recent one for fallback (if no path exists)
         local ctime_part="${fid##*:}"
         if [[ "$ctime_part" =~ ^[0-9]+$ ]] && (( ctime_part > newest_ctime )); then
           newest_ctime="$ctime_part"; newest_fid="$fid"
         fi
       done
 
-      # (2) Nessun path esistente? Usa la più recente (best-effort)
+      # (2) No existing path? Use the most recent one (best-effort)
       if [[ -z "$found_fid" && -n "$newest_fid" ]]; then
         found_fid="$newest_fid"
       fi
@@ -878,7 +878,7 @@ trap 'on_interrupt' INT TERM HUP
 #     local relfile inode fh
 #     relfile="${f#"$LOCAL_DIR"/}"
 #     inode=$(get_inode "$f"); [[ -z "$inode" ]] && continue
-
+#
 #     # align with watcher path/hash scheme (dedup/transform-map)
 #     if fh=$(compute_hash "$f"); then
 #       path_hash_key="${fh}___${relfile}"
@@ -886,19 +886,19 @@ trap 'on_interrupt' INT TERM HUP
 #     else
 #       log_warning "Cold-start hash failed: $relfile"
 #     fi
-
+#
 #     log_debug "Cold-start: requeue $relfile"
 #     handle_file "$f" "$relfile" "$inode" || log_warning "Cold-start failed on $relfile"
 # #   done < <(find "$LOCAL_DIR" -type f -not -path '*/.*' -print0)
 #     done < <(find "$LOCAL_DIR" -type f -print0)
 # }
-
+#
 # cold_start_rescan() {
 #   log_info "Cold-start rescan (start);"
-
+#
 #   # During cold start, we do not want to create directories on the remote server.
 #   export IRS_SUPPRESS_DIR_CREATE=1
-
+#
 #   # Scan all local FILES (including those in dotdir), excluding the temporary area.
 #   # Note: we do not touch directories -> no accidental mkdir.
 #   local f rel
@@ -909,7 +909,7 @@ trap 'on_interrupt' INT TERM HUP
 #     # handle_file "$rel" "coldstart" || log_warning "Cold start: handle_file failed for: $rel"
 #     handle_file "$f" "$rel" "$inode" || log_warning "Cold start: handle_file failed for: $rel"
 #   done < <(find "$LOCAL_DIR" -mindepth 1 -type f ! -path "$LOCAL_DIR/.irs-tmp/*" -print0)
-
+#
 #   unset IRS_SUPPRESS_DIR_CREATE
 #   log_info "Cold-start rescan (done);"
 # }
@@ -962,7 +962,7 @@ main_loop() {
       local SUBPATH
       SUBPATH="${DIR#"$LOCAL_DIR"}"
       SUBPATH="${SUBPATH#/}"
-      rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1 || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
+      rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&v/null || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
     done < <(find "$LOCAL_DIR" -mindepth 1 -type d -empty -print0 2>/dev/null)
   fi
 
@@ -973,11 +973,11 @@ main_loop() {
     BN=$(basename "$RELATIVE_PATH")
     log_debug "Event '$EVENT' -> $RELATIVE_PATH"
 
-        # --- Flush hold scaduti (dir/file) ---
+    # --- Flush expired holds (dir/file) ---
     local now
     now=$(date +%s)
 
-    # Directory in hold scadute → (eventuale) creazione scheletro remoto
+    # Directories on hold expired → (if needed) create remote skeleton
     local keys id ts dpath SUBPATH
     keys=( "${!DIR_HOLD[@]}" )
     for id in "${keys[@]}"; do
@@ -998,7 +998,7 @@ main_loop() {
       fi
     done
 
-    # File in hold scaduti → processa con handle_file (rispettando zero-byte policy)
+    # Files on hold expired → process with handle_file (respecting zero-byte policy)
     local fkeys fid ts fpath rel fsz
     fkeys=( "${!FILE_HOLD[@]}" )
     for fid in "${fkeys[@]}"; do
@@ -1007,11 +1007,11 @@ main_loop() {
         if [[ -f "$fpath" ]]; then
           rel="${fpath#"$LOCAL_DIR"/}"
 
-          # Se la policy vieta l'upload 0B su CREATE, prolunga l'hold finché resta vuoto
+          # If the policy forbids 0B upload on CREATE, extend the hold while it remains empty
           if [[ "${IRS_UPLOAD_ZERO_ON_CREATE:-1}" == "0" ]]; then
             fsz=$(stat -c %s "$fpath" 2>/dev/null || echo 0)
             if [[ "$fsz" -eq 0 ]]; then
-              FILE_HOLD["$fid"]="$(date +%s)|$fpath"  # rinnovo hold
+              FILE_HOLD["$fid"]="$(date +%s)|$fpath"  # renew hold
               log_debug "File hold extended (zero-byte): '$rel'"
               continue
             fi
@@ -1030,7 +1030,7 @@ main_loop() {
     #   continue
     # fi
 
-    # Skip solo file temporanei noti (NON scartare i dotfile)
+    # Skip only known temp files (do NOT skip dotfiles)
     if [[ "$BN" =~ ^\.goutputstream || "$BN" =~ \.(swp|part|tmp|bak)$ ]]; then
       log_warning "Skipped early in main_loop: $RELATIVE_PATH"
       continue
@@ -1039,66 +1039,67 @@ main_loop() {
 
     # Directory events
     if [[ -d "$FULLPATH" ]]; then
-    #   # Mirror directories on MOVED_TO (final name) and/or CREATE (toggle)
-    #   if [[ "$IRS_MIRROR_EMPTY_DIRS" == "1" && ( "$EVENT" == *"MOVED_TO"* || ( "$IRS_MIRROR_DIRS_ON_CREATE" == "1" && "$EVENT" == *"CREATE"* ) ) ]]; then
-    #     local SUBPATH
-    #     SUBPATH="${FULLPATH#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
-    #     rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1 || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
+#     # Mirror directories on MOVED_TO (final name) and/or CREATE (toggle)
+#     if [[ "$IRS_MIRROR_EMPTY_DIRS" == "1" && ( "$EVENT" == *"MOVED_TO"* || ( "$IRS_MIRROR_DIRS_ON_CREATE" == "1" && "$EVENT" == *"CREATE"* ) ) ]]; then
+#       local SUBPATH
+#       SUBPATH="${FULLPATH#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
+#       rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1 || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
+#
+#       # Ensure any currently-empty subdirs inside it exist remotely
+#       while IFS= read -r -d '' DIR; do
+#         SUBPATH="${DIR#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
+#         rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1 || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
+#       done < <( { find "$FULLPATH" -mindepth 1 -type d -empty -print0 2>/dev/null || true; } )
+#     fi
+#     # Replicate the entire directory skeleton (including NON-empty ones)
+#     if [[ "$IRS_MIRROR_EMPTY_DIRS" == "1" && ( "$EVENT" == *"MOVED_TO"* || ( "$IRS_MIRROR_DIRS_ON_CREATE" == "1" && "$EVENT" == *"CREATE"* ) ) ]]; then
+#       if [[ "${IRS_SUPPRESS_DIR_CREATE:-0}" != "1" ]]; then
+#         while IFS= read -r -d '' d; do
+#           SUBPATH="${d#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
+#           ensure_remote_dir "$REMOTE_DIR/$SUBPATH" || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
+#         done < <(find "$FULLPATH" -type d -print0 2>/dev/null)
+#       else
+#         log_debug "mkdir suppressed for skeleton of '$RELATIVE_PATH'"
+#       fi
+#     fi
+#
+#     # Replicate the entire directory skeleton (including NON-empty ones)
+#     if [[ "$IRS_MIRROR_EMPTY_DIRS" == "1" && ( "$EVENT" == *"MOVED_TO"* || ( "$IRS_MIRROR_DIRS_ON_CREATE" == "1" && "$EVENT" == *"CREATE"* ) ) ]]; then
+#       # (Optional) Avoid creating on CREATE if the name is a file-manager “placeholder”
+#       # Comment out the case block if you don't need it.
+#       if [[ "$EVENT" == *"CREATE"* ]]; then
+#         case "$(basename -- "$FULLPATH")" in
+#           "Cartella senza nome"|"Nuova cartella"|"New Folder"|"Untitled Folder")
+#             log_debug "Skip CREATE placeholder; wait for MOVED_TO for '$RELATIVE_PATH'"
+#             :
+#             ;;
+#           *)
+#             if [[ "${IRS_SUPPRESS_DIR_CREATE:-0}" != "1" ]]; then
+#               while IFS= read -r -d '' d; do
+#                 local SUBPATH
+#                 SUBPATH="${d#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
+#                 ensure_remote_dir "$REMOTE_DIR/$SUBPATH" || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
+#               done < <(find "$FULLPATH" -type d -print0 2>/dev/null)
+#             else
+#               log_debug "mkdir suppressed for skeleton of '$RELATIVE_PATH'"
+#             fi
+#             ;;
+#         esac
+#       else
+#         # MOVED_TO path (always safe)
+#         if [[ "${IRS_SUPPRESS_DIR_CREATE:-0}" != "1" ]]; then
+#           while IFS= read -r -d '' d; do
+#             local SUBPATH
+#             SUBPATH="${d#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
+#             ensure_remote_dir "$REMOTE_DIR/$SUBPATH" || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
+#           done < <(find "$FULLPATH" -type d -print0 2>/dev/null)
+#         else
+#           log_debug "mkdir suppressed for skeleton of '$RELATIVE_PATH'"
+#         fi
+#       fi
+#     fi
 
-    #     # Ensure any currently-empty subdirs inside it exist remotely
-    #     while IFS= read -r -d '' DIR; do
-    #       SUBPATH="${DIR#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
-    #       rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1 || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
-    #     done < <( { find "$FULLPATH" -mindepth 1 -type d -empty -print0 2>/dev/null || true; } )
-    #   fi
-    # # Replica l’intero scheletro di directory (incluse quelle NON vuote)
-    #   if [[ "$IRS_MIRROR_EMPTY_DIRS" == "1" && ( "$EVENT" == *"MOVED_TO"* || ( "$IRS_MIRROR_DIRS_ON_CREATE" == "1" && "$EVENT" == *"CREATE"* ) ) ]]; then
-    #     if [[ "${IRS_SUPPRESS_DIR_CREATE:-0}" != "1" ]]; then
-    #       while IFS= read -r -d '' d; do
-    #         SUBPATH="${d#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
-    #         ensure_remote_dir "$REMOTE_DIR/$SUBPATH" || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
-    #       done < <(find "$FULLPATH" -type d -print0 2>/dev/null)
-    #     else
-    #       log_debug "mkdir suppressed per skeleton di '$RELATIVE_PATH'"
-    #     fi
-    #   fi
-
-    #   # Replica l’intero scheletro di directory (incluse quelle NON vuote)
-    #   if [[ "$IRS_MIRROR_EMPTY_DIRS" == "1" && ( "$EVENT" == *"MOVED_TO"* || ( "$IRS_MIRROR_DIRS_ON_CREATE" == "1" && "$EVENT" == *"CREATE"* ) ) ]]; then
-    #   # (Opzionale) Evita di creare su CREATE se il nome è il “placeholder” del file manager
-    #   # Commenta il case se non ti serve.
-    #     if [[ "$EVENT" == *"CREATE"* ]]; then
-    #       case "$(basename -- "$FULLPATH")" in
-    #         "Cartella senza nome"|"Nuova cartella"|"New Folder"|"Untitled Folder")
-    #             log_debug "Skip CREATE placeholder; attendo MOVED_TO per '$RELATIVE_PATH'"
-    #             :
-    #             ;;
-    #         *)
-    #         if [[ "${IRS_SUPPRESS_DIR_CREATE:-0}" != "1" ]]; then
-    #             while IFS= read -r -d '' d; do
-    #             local SUBPATH
-    #             SUBPATH="${d#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
-    #             ensure_remote_dir "$REMOTE_DIR/$SUBPATH" || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
-    #             done < <(find "$FULLPATH" -type d -print0 2>/dev/null)
-    #         else
-    #             log_debug "mkdir suppressed per skeleton di '$RELATIVE_PATH'"
-    #         fi
-    #         ;;
-    #       esac
-    #     else
-    #       # Percorso MOVED_TO (sempre sicuro)
-    #       if [[ "${IRS_SUPPRESS_DIR_CREATE:-0}" != "1" ]]; then
-    #         while IFS= read -r -d '' d; do
-    #           local SUBPATH
-    #           SUBPATH="${d#"$LOCAL_DIR"}"; SUBPATH="${SUBPATH#/}"
-    #           ensure_remote_dir "$REMOTE_DIR/$SUBPATH" || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
-    #         done < <(find "$FULLPATH" -type d -print0 2>/dev/null)
-    #       else
-    #         log_debug "mkdir suppressed per skeleton di '$RELATIVE_PATH'"
-    #       fi
-    #     fi
-    #   fi
-    # --- HOLD su CREATE per evitare i placeholder dei file manager ---
+    # --- HOLD on CREATE to avoid file-manager placeholders ---
     local dinode
     dinode=$(get_inode "$FULLPATH") || true
     [[ -z "$dinode" ]] && { log_debug "Empty inode (dir) for $RELATIVE_PATH"; continue; }
@@ -1106,11 +1107,11 @@ main_loop() {
     if [[ "$EVENT" == *"CREATE"* ]]; then
       DIR_HOLD["$dinode"]="$(date +%s)|$FULLPATH"
       log_debug "Dir hold (CREATE): '$RELATIVE_PATH'"
-      # non creare nulla in remoto, non scansionare file ora
+      # do not create anything remotely, do not scan files now
       continue
     fi
 
-    # --- MOVED_TO oppure hold presente → ora è sicuro creare lo scheletro ---
+    # --- MOVED_TO or hold present → now it's safe to create the skeleton ---
     if [[ "$IRS_MIRROR_EMPTY_DIRS" == "1" && ( -n "${DIR_HOLD[$dinode]:-}" || "$EVENT" == *"MOVED_TO"* ) ]]; then
       [[ -n "${DIR_HOLD[$dinode]:-}" ]] && unset 'DIR_HOLD[$dinode]'
       if [[ "${IRS_SUPPRESS_DIR_CREATE:-0}" != "1" ]]; then
@@ -1120,49 +1121,49 @@ main_loop() {
           ensure_remote_dir "$REMOTE_DIR/$SUBPATH" || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
         done < <(find "$FULLPATH" -type d -print0 2>/dev/null)
       else
-        log_debug "mkdir suppressed per skeleton di '$RELATIVE_PATH'"
+        log_debug "mkdir suppressed for skeleton of '$RELATIVE_PATH'"
       fi
     fi
 
       # Process files within the directory (be tolerant to races)
-    #   while IFS= read -r -d '' FILE; do
-    #     [[ -e "$FILE" ]] || { log_debug "Vanished after scan: ${FILE#"$LOCAL_DIR"/}"; continue; }
-    #     local RELFILE
-    #     RELFILE="${FILE#"$LOCAL_DIR"/}"
-    #     inode=$(get_inode "$FILE"); [[ -z "$inode" ]] && continue
-    #     handle_file "$FILE" "$RELFILE" "$inode"
-    #   done < <( { find "$FULLPATH" -type f -print0 2>/dev/null || true; } )
-    # while IFS= read -r -d '' FILE; do
-    #   [[ -e "$FILE" ]] || { log_debug "Vanished after scan: $RELFILE"; continue; }
-
-    #   local RELFILE FILE_HASH path_hash_key original_pair
-    #   RELFILE="${FILE#"$LOCAL_DIR"/}"
-
-    #   # Dedup come nel percorso eventi file
-    #   if ! FILE_HASH=$(compute_hash "$FILE"); then
-    #     log_debug "Hash race during dir-scan for $RELFILE"; continue
-    #   fi
-    #   path_hash_key="${FILE_HASH}___${RELFILE}"
-    #   original_pair="$path_hash_key"
-    #   if should_skip_due_to_transform_map "$original_pair"; then
-    #     continue
-    #   fi
-
-    #   inode=$(get_inode "$FILE"); [[ -z "$inode" ]] && continue
-    #   if [[ "${PATH_HASH_SEEN[$path_hash_key]:-}" == "$inode" ]]; then
-    #     log_warning "Skipped (dir-scan dedup): already processed $FILE"
-    #     continue
-    #   fi
-
-    #   handle_file "$FILE" "$RELFILE" "$inode"
-    # done < <( { find "$FULLPATH" -type f -print0 2>/dev/null || true; } )
+#     while IFS= read -r -d '' FILE; do
+#       [[ -e "$FILE" ]] || { log_debug "Vanished after scan: ${FILE#"$LOCAL_DIR"/}"; continue; }
+#       local RELFILE
+#       RELFILE="${FILE#"$LOCAL_DIR"/}"
+#       inode=$(get_inode "$FILE"); [[ -z "$inode" ]] && continue
+#       handle_file "$FILE" "$RELFILE" "$inode"
+#     done < <( { find "$FULLPATH" -type f -print0 2>/dev/null || true; } )
+#     while IFS= read -r -d '' FILE; do
+#       [[ -e "$FILE" ]] || { log_debug "Vanished after scan: $RELFILE"; continue; }
+#
+#       local RELFILE FILE_HASH path_hash_key original_pair
+#       RELFILE="${FILE#"$LOCAL_DIR"/}"
+#
+#       # Dedup like in the file-event path
+#       if ! FILE_HASH=$(compute_hash "$FILE"); then
+#         log_debug "Hash race during dir-scan for $RELFILE"; continue
+#       fi
+#       path_hash_key="${FILE_HASH}___${RELFILE}"
+#       original_pair="$path_hash_key"
+#       if should_skip_due_to_transform_map "$original_pair"; then
+#         continue
+#       fi
+#
+#       inode=$(get_inode "$FILE"); [[ -z "$inode" ]] && continue
+#       if [[ "${PATH_HASH_SEEN[$path_hash_key]:-}" == "$inode" ]]; then
+#         log_warning "Skipped (dir-scan dedup): already processed $FILE"
+#         continue
+#       fi
+#
+#       handle_file "$FILE" "$RELFILE" "$inode"
+#     done < <( { find "$FULLPATH" -type f -print0 2>/dev/null || true; } )
     while IFS= read -r -d '' FILE; do
       local RELFILE FILE_HASH path_hash_key original_pair
       RELFILE="${FILE#"$LOCAL_DIR"/}"
 
       [[ -e "$FILE" ]] || { log_debug "Vanished after scan: $RELFILE"; continue; }
 
-      # Dedup come nel percorso eventi file
+      # Dedup like in the file-event path
       if ! FILE_HASH=$(compute_hash "$FILE"); then
         log_debug "Hash race during dir-scan for $RELFILE"; continue
       fi
@@ -1183,57 +1184,57 @@ main_loop() {
     continue
 
     elif [[ -f "$FULLPATH" ]]; then
-    #   # Evita upload dei file placeholder finché non arriva il nome finale (MOVED_TO)
-    #   case "$BN" in
-    #     *Documento\ senza\ nome*|*Nuovo\ documento*|*Nuovo\ file*|*Senza\ titolo*|*Untitled*|*New\ Document*|*New\ File*)
-    #       if [[ "$EVENT" != *"MOVED_TO"* ]]; then
-    #         log_debug "Skip placeholder ($EVENT); attendo MOVED_TO per '$RELATIVE_PATH'"
-    #         continue
-    #       fi
-    #       ;;
-    #   esac
-    #   # --- HOLD su CREATE per attendere rename/contenuto stabile ---
-    #   local finode
-    #   finode=$(get_inode "$FULLPATH") || true
-    #   [[ -z "$finode" ]] && { log_debug "Empty inode (file) for $RELATIVE_PATH"; continue; }
+#     # Avoid uploading placeholder files until the final name (MOVED_TO) arrives
+#     case "$BN" in
+#       *Documento\ senza\ nome*|*Nuovo\ documento*|*Nuovo\ file*|*Senza\ titolo*|*Untitled*|*New\ Document*|*New\ File*)
+#         if [[ "$EVENT" != *"MOVED_TO"* ]]; then
+#           log_debug "Skip placeholder ($EVENT); waiting for MOVED_TO for '$RELATIVE_PATH'"
+#           continue
+#         fi
+#         ;;
+#     esac
+#     # --- HOLD on CREATE to wait for rename/stable content ---
+#     local finode
+#     finode=$(get_inode "$FULLPATH") || true
+#     [[ -z "$finode" ]] && { log_debug "Empty inode (file) for $RELATIVE_PATH"; continue; }
+#
+#     if [[ "$EVENT" == *"CREATE"* ]]; then
+#       FILE_HOLD["$finode"]="$(date +%s)|$FULLPATH"
+#       log_debug "File hold (CREATE): waiting up to ${IRS_FILE_CREATE_GRACE}s for rename/content '$RELATIVE_PATH'"
+#       continue
+#     fi
+#
+#     # If the final name arrives, release the hold immediately
+#     if [[ "$EVENT" == *"MOVED_TO"* && -n "${FILE_HOLD[$finode]:-}" ]]; then
+#       unset 'FILE_HOLD[$finode]'
+#     fi
+#
+#     # If the file is on hold and CLOSE_WRITE arrives: release the hold (no useless wait)
+#     if [[ -n "${FILE_HOLD[$finode]:-}" && "$EVENT" == *"CLOSE_WRITE"* ]]; then
+#       if [[ "${IRS_UPLOAD_ZERO_ON_CREATE:-1}" == "1" ]]; then
+#         # eager policy: OK even 0B after close
+#         unset 'FILE_HOLD[$finode]'
+#         log_debug "File hold released on CLOSE_WRITE (eager): '$RELATIVE_PATH'"
+#       else
+#         # strict policy: release only if >0B, otherwise keep on hold
+#         fsz=$(stat -c %s -- "$FULLPATH" 2>/dev/null || echo 0)
+#         if (( fsz > 0 )); then
+#           unset 'FILE_HOLD[$finode]'
+#           log_debug "File hold released on CLOSE_WRITE (>0B): '$RELATIVE_PATH'"
+#         else
+#           log_debug "Still in file CREATE hold → skip '$RELATIVE_PATH' (waiting for rename or >0B)"
+#           continue
+#         fi
+#       fi
+#     fi
+#
+#     # If still within hold and MOVED_TO hasn't arrived, skip this event
+#     if [[ -n "${FILE_HOLD[$finode]:-}" && "$EVENT" != *"MOVED_TO"* ]]; then
+#       log_debug "Still in file CREATE hold → skip '$RELATIVE_PATH' (event=$EVENT)"
+#       continue
+#     fi
 
-    #   if [[ "$EVENT" == *"CREATE"* ]]; then
-    #     FILE_HOLD["$finode"]="$(date +%s)|$FULLPATH"
-    #     log_debug "File hold (CREATE): waiting up to ${IRS_FILE_CREATE_GRACE}s for rename/content '$RELATIVE_PATH'"
-    #     continue
-    #   fi
-
-    #   # Se arriva il nome finale, rilascia immediatamente l'hold
-    #   if [[ "$EVENT" == *"MOVED_TO"* && -n "${FILE_HOLD[$finode]:-}" ]]; then
-    #     unset 'FILE_HOLD[$finode]'
-    #   fi
-
-    #   # Se il file è in hold e arriva CLOSE_WRITE: rilascia l'hold (niente attesa inutile)
-    #   if [[ -n "${FILE_HOLD[$finode]:-}" && "$EVENT" == *"CLOSE_WRITE"* ]]; then
-    #     if [[ "${IRS_UPLOAD_ZERO_ON_CREATE:-1}" == "1" ]]; then
-    #       # policy eager: ok anche 0B dopo la chiusura
-    #       unset 'FILE_HOLD[$finode]'
-    #       log_debug "File hold released on CLOSE_WRITE (eager): '$RELATIVE_PATH'"
-    #     else
-    #       # policy strict: rilascia solo se >0B, altrimenti resta in hold
-    #       fsz=$(stat -c %s -- "$FULLPATH" 2>/dev/null || echo 0)
-    #       if (( fsz > 0 )); then
-    #         unset 'FILE_HOLD[$finode]'
-    #         log_debug "File hold released on CLOSE_WRITE (>0B): '$RELATIVE_PATH'"
-    #       else
-    #         log_debug "Still in file CREATE hold → skip '$RELATIVE_PATH' (waiting for rename or >0B)"
-    #         continue
-    #       fi
-    #     fi
-    #   fi
-
-    #   # Se siamo ancora nel periodo di hold e NON è arrivato MOVED_TO, salta questo evento
-    #   if [[ -n "${FILE_HOLD[$finode]:-}" && "$EVENT" != *"MOVED_TO"* ]]; then
-    #     log_debug "Still in file CREATE hold → skip '$RELATIVE_PATH' (event=$EVENT)"
-    #     continue
-    #   fi
-
-    # --- HOLD su CREATE per attendere rename/contenuto stabile ---
+    # --- HOLD on CREATE to wait for rename/stable content ---
     local finode
     finode=$(get_inode "$FULLPATH") || true
     [[ -z "$finode" ]] && { log_debug "Empty inode (file) for $RELATIVE_PATH"; continue; }
@@ -1244,12 +1245,12 @@ main_loop() {
       continue
     fi
 
-    # Se arriva il nome finale, rilascia immediatamente l'hold
+    # If the final name arrives, release the hold immediately
     if [[ -n "${FILE_HOLD[$finode]:-}" && "$EVENT" == *"MOVED_TO"* ]]; then
       unset 'FILE_HOLD[$finode]'
     fi
 
-    # Se il file è in hold e arriva una chiusura: rilascia l'hold (robusto con 'case')
+    # If the file is on hold and a close event arrives: release the hold (robust with 'case')
     if [[ -n "${FILE_HOLD[$finode]:-}" ]]; then
       case "$EVENT" in
         (*CLOSE_WRITE*)
@@ -1268,7 +1269,7 @@ main_loop() {
           fi
           ;;
         (*CLOSE*)
-          # Fallback: alcuni strumenti emettono solo CLOSE
+          # Fallback: some tools emit only CLOSE
           if [[ "${IRS_UPLOAD_ZERO_ON_CREATE:-1}" == "1" ]]; then
             unset 'FILE_HOLD[$finode]'
             log_debug "File hold released on CLOSE (eager fallback): '$RELATIVE_PATH'"
@@ -1286,7 +1287,7 @@ main_loop() {
       esac
     fi
 
-    # Se siamo ancora nel periodo di hold e NON è arrivato MOVED_TO, salta questo evento
+    # If we are still in the hold period and MOVED_TO has NOT arrived, skip this event
     if [[ -n "${FILE_HOLD[$finode]:-}" && "$EVENT" != *"MOVED_TO"* ]]; then
       log_debug "Still in file CREATE hold → skip '$RELATIVE_PATH' (event=$EVENT)"
       continue

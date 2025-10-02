@@ -39,7 +39,7 @@ _tmp_path_for() {
 #   local dst="$1" parent base name ext candidate i
 #   parent="$(dirname "$dst")"
 #   base="$(basename "$dst")"
-
+#
 # #   # split base into name + extension (preserve last dot; composite exts handled by main)
 # #   if [[ "$base" == .* || "$base" != *.* ]]; then
 # #     name="$base"
@@ -67,7 +67,7 @@ _tmp_path_for() {
 #       ext=""
 #     fi
 #   fi
-
+#
 #   # If it already ends with "-(copy)" or "-(copy N)", start incrementing from N+1
 #   local suffix="-(copy)"
 #   local count_start=1
@@ -76,17 +76,17 @@ _tmp_path_for() {
 #   elif [[ "$name" =~ ^(.+)-\(copy\ ([0-9]+)\)$ ]]; then
 #     name="${BASH_REMATCH[1]}"; count_start=$(( BASH_REMATCH[2] + 1 ))
 #   fi
-
+#
 #   # Preload sibling names once
 #   local siblings_json
 #   siblings_json="$(rclone lsjson --files-only "$parent" 2>/dev/null)" || siblings_json="[]"
-
+#
 #   # First try plain "-(copy)"
 #   candidate="$parent/${name}${suffix}${ext}"
 #   if ! jq -e --arg n "$(basename "$candidate")" 'any(.[]; .Name == $n)' >/dev/null 2>&1 <<<"$siblings_json"; then
 #     printf '%s\n' "$candidate"; return 0
 #   fi
-
+#
 #   # Then "-(copy N)"
 #   for (( i=count_start; i<=9999; i++ )); do
 #     candidate="$parent/${name}-(${suffix#-(} ${i})${ext}"   # builds "-(copy N)"
@@ -94,16 +94,16 @@ _tmp_path_for() {
 #       printf '%s\n' "$candidate"; return 0
 #     fi
 #   done
-
+#
 #   # Fallback (should never happen)
 #   printf '%s\n' "$parent/${name}-copy-${RANDOM}${ext}"
 #   return 0
 # }
 
-# Returns a free remote path with suffix (copy):
-#   nome-(copia).ext, nome-(copia 2).ext, ...
+# Returns a free remote path with (copy) suffix:
+#   name-(copy).ext, name-(copy 2).ext, ...
 # shellcheck disable=SC2154  # composite_exts is defined in the main script
-_next_copy_dest() { # $1 = full remote path, es: "$REMOTE_DIR/path/name.ext"
+_next_copy_dest() { # $1 = full remote path, e.g. "$REMOTE_DIR/path/name.ext"
   local dest="$1"
   local dir base stem ext ce found=0
 
