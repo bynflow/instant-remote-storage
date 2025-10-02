@@ -1,3 +1,15 @@
+instant-remote-storage (4.2.0-1) unstable; urgency=medium
+
+  * New upstream release 4.2.0; README aggiornato; Known issues.
+
+ -- Carlo Capobianchi <bynrflow@gmail.com>  Thu, 02 Oct 2025 21:25:54 +0200
+
+instant-remote-storage (4.2.0-1) unstable; urgency=medium
+
+  * New upstream release 4.2.0; README aggiornato; Known issues.
+
+ -- Carlo Capobianchi <bynrflow@gmail.com>  Thu, 02 Oct 2025 21:06:38 +0200
+
 instant-remote-storage (3.1.0-2) unstable; urgency=medium
 
   * d/copyright: set license to Expat (MIT) to match upstream; add
