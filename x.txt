@@ -1,0 +1,1570 @@
+..
+├── bkp-del-attuale-ins-rem-stor-da-cancellare
+│   ├── instant-remote-storage.sh
+│   └── lib
+│       └── irs_recovery.sh
+├── bk-personalizzato
+│   ├── backup-smart-onboot.service
+│   ├── backup-smart-onboot.timer
+│   ├── backup-smart.service
+│   ├── backup-smart.timer
+│   ├── backup-smart_versione_attuale.sh
+│   ├── Documento_personale_istruzioni_e_comprensione_script_backup-smart.md
+│   └── README.md
+├── build-3.0.0-12
+│   ├── instant-remote-storage_3.0.0-12_all.deb
+│   ├── instant-remote-storage_3.0.0-12_amd64.buildinfo
+│   ├── instant-remote-storage_3.0.0-12_amd64.changes
+│   ├── instant-remote-storage_3.0.0-12.debian.tar.xz
+│   ├── instant-remote-storage_3.0.0-12.dsc
+│   ├── instant-remote-storage_3.0.0-12_source.buildinfo
+│   ├── instant-remote-storage_3.0.0-12_source.changes
+│   ├── instant-remote-storage_3.0.0-12_source.mentors.upload
+│   └── instant-remote-storage_3.0.0.orig.tar.gz
+├── build-3.0.0-13
+│   ├── instant-remote-storage_3.0.0-13_amd64.build
+│   ├── instant-remote-storage_3.0.0-13_amd64.buildinfo
+│   ├── instant-remote-storage_3.0.0-13_amd64.changes
+│   ├── instant-remote-storage_3.0.0-13.debian.tar.xz
+│   ├── instant-remote-storage_3.0.0-13.dsc
+│   ├── instant-remote-storage_3.0.0-13_source.build
+│   ├── instant-remote-storage_3.0.0-13_source.buildinfo
+│   ├── instant-remote-storage_3.0.0-13_source.changes
+│   └── instant-remote-storage_3.0.0-13_source.mentors.upload
+├── build-3.1.0-1
+│   ├── instant-remote-storage_3.1.0-1_amd64.build
+│   ├── instant-remote-storage_3.1.0-1.debian.tar.xz
+│   ├── instant-remote-storage_3.1.0-1.dsc
+│   ├── instant-remote-storage_3.1.0-1_source.build
+│   ├── instant-remote-storage_3.1.0-1_source.buildinfo
+│   ├── instant-remote-storage_3.1.0-1_source.changes
+│   ├── instant-remote-storage_3.1.0-1_source.mentors.upload
+│   └── instant-remote-storage_3.1.0.orig.tar.gz
+├── build-3.1.0-2
+│   ├── instant-remote-storage_3.1.0-2_source.build
+│   ├── instant-remote-storage_3.1.0-2_source.buildinfo
+│   ├── instant-remote-storage_3.1.0-2_source.changes
+│   ├── instant-remote-storage_3.1.0-2_source.mentors.upload
+│   └── instant-remote-storage_3.1.0.orig.tar.gz
+├── build-area
+│   ├── carlo_pubkey.asc
+│   ├── carlo_pubkey.gpg
+│   ├── instant-remote-storage-3.0.0
+│   │   ├── CHANGELOG.md
+│   │   ├── CONTRIBUTING.md
+│   │   ├── debian
+│   │   │   ├── changelog
+│   │   │   ├── control
+│   │   │   ├── copyright
+│   │   │   ├── .debhelper
+│   │   │   │   └── generated
+│   │   │   │       ├── instant-remote-storage
+│   │   │   │       │   ├── dh_installchangelogs.dch.trimmed
+│   │   │   │       │   ├── installed-by-dh_install
+│   │   │   │       │   ├── installed-by-dh_installdocs
+│   │   │   │       │   └── installed-by-dh_installman
+│   │   │   │       └── _source
+│   │   │   │           └── home
+│   │   │   ├── debhelper-build-stamp
+│   │   │   ├── docs
+│   │   │   │   └── README.Debian
+│   │   │   ├── files
+│   │   │   ├── install
+│   │   │   ├── instant-remote-storage
+│   │   │   │   ├── DEBIAN
+│   │   │   │   │   ├── control
+│   │   │   │   │   └── md5sums
+│   │   │   │   ├── lib
+│   │   │   │   │   └── systemd
+│   │   │   │   │       └── system
+│   │   │   │   │           └── instant-remote-storage@.service
+│   │   │   │   └── usr
+│   │   │   │       ├── bin
+│   │   │   │       │   └── instant-remote-storage
+│   │   │   │       ├── lib
+│   │   │   │       │   └── instant-remote-storage
+│   │   │   │       │       ├── instant-remote-storage.sh
+│   │   │   │       │       ├── lib
+│   │   │   │       │       │   └── irs_recovery.sh
+│   │   │   │       │       └── mime_map.sh
+│   │   │   │       ├── sbin
+│   │   │   │       │   └── irs-setup
+│   │   │   │       └── share
+│   │   │   │           ├── doc
+│   │   │   │           │   └── instant-remote-storage
+│   │   │   │           │       ├── changelog.Debian.gz
+│   │   │   │           │       ├── changelog.gz
+│   │   │   │           │       ├── copyright
+│   │   │   │           │       └── README.Debian
+│   │   │   │           └── man
+│   │   │   │               ├── man1
+│   │   │   │               │   └── instant-remote-storage.1.gz
+│   │   │   │               └── man8
+│   │   │   │                   └── irs-setup.8.gz
+│   │   │   ├── instant-remote-storage.substvars
+│   │   │   ├── irs-setup
+│   │   │   ├── man
+│   │   │   │   ├── instant-remote-storage.1
+│   │   │   │   └── irs-setup.8
+│   │   │   ├── manpages
+│   │   │   ├── patches
+│   │   │   │   ├── 0001-core-skip-unchanged-files-on-restart-by-id-path-hash.patch
+│   │   │   │   └── series
+│   │   │   ├── rules
+│   │   │   ├── source
+│   │   │   │   └── format
+│   │   │   ├── systemd
+│   │   │   │   └── instant-remote-storage@.service
+│   │   │   ├── upstream
+│   │   │   │   ├── metadata
+│   │   │   │   └── signing-key.asc
+│   │   │   ├── watch
+│   │   │   └── wrapper
+│   │   │       └── instant-remote-storage
+│   │   ├── instant-remote-storage.sh
+│   │   ├── lib
+│   │   │   └── irs_recovery.sh
+│   │   ├── LICENSE
+│   │   ├── mime_map.sh
+│   │   ├── .pc
+│   │   │   ├── 0001-core-skip-unchanged-files-on-restart-by-id-path-hash.patch
+│   │   │   │   ├── CONTRIBUTING.md
+│   │   │   │   ├── instant-remote-storage.sh
+│   │   │   │   └── README.md
+│   │   │   ├── applied-patches
+│   │   │   ├── .quilt_patches
+│   │   │   ├── .quilt_series
+│   │   │   └── .version
+│   │   ├── README.md
+│   │   ├── scripts
+│   │   │   └── irs-setup
+│   │   └── systemd
+│   │       ├── system
+│   │       │   └── instant-remote-storage@.service
+│   │       └── user
+│   │           └── instant-remote-storage@.service
+│   ├── instant-remote-storage_3.0.0-14_all.deb
+│   ├── instant-remote-storage_3.0.0-14_amd64.build
+│   ├── instant-remote-storage_3.0.0-14_amd64.buildinfo
+│   ├── instant-remote-storage_3.0.0-14_amd64.changes
+│   ├── instant-remote-storage_3.0.0-14.debian.tar.xz
+│   ├── instant-remote-storage_3.0.0-14.dsc
+│   ├── instant-remote-storage_3.0.0-14_source.build
+│   ├── instant-remote-storage_3.0.0-14_source.buildinfo
+│   ├── instant-remote-storage_3.0.0-14_source.changes
+│   ├── instant-remote-storage_3.0.0.orig.tar.gz
+│   ├── trustedkeys.gpg
+│   └── trustedkeys.gpg~
+├── COMANDI-FISSI
+├── Copia-instant-storage.sh
+├── debugging-instant-storage-appunti
+├── dist
+│   └── instant-remote-storage_4.2.0-2
+│       ├── instant-remote-storage_4.2.0-2_all.deb
+│       ├── instant-remote-storage_4.2.0-2_amd64.buildinfo
+│       ├── instant-remote-storage_4.2.0-2.debian.tar.xz
+│       ├── instant-remote-storage_4.2.0-2.dsc
+│       └── instant-remote-storage_4.2.0.orig.tar.gz -> /home/carlo/agenda_quotidiana/flow-devops/set-up-macchina-locale/backup-smart/backup-smart_personalizzato/irs_dist/instant-remote-storage_4.2.0-1/instant-remote-storage_4.2.0.orig.tar.gz
+├── docs
+│   ├── documentazione_profonda_ri-comprensione_dello_scripy_backup_smart
+│   └── RESTORATION_GUIDE.md
+├── instant-remote-storage
+│   ├── CHANGELOG.md
+│   ├── CONTRIBUTING.md
+│   ├── debian
+│   │   ├── changelog
+│   │   ├── control
+│   │   ├── copyright
+│   │   ├── docs
+│   │   │   └── README.Debian
+│   │   ├── install
+│   │   ├── irs-setup
+│   │   ├── man
+│   │   │   ├── instant-remote-storage.1
+│   │   │   └── irs-setup.8
+│   │   ├── manpages
+│   │   ├── patches
+│   │   │   └── series
+│   │   ├── rules
+│   │   ├── source
+│   │   │   ├── format
+│   │   │   └── options
+│   │   ├── systemd
+│   │   │   └── instant-remote-storage@.service
+│   │   ├── upstream
+│   │   │   └── metadata
+│   │   ├── watch
+│   │   └── wrapper
+│   │       └── instant-remote-storage
+│   ├── .git
+│   │   ├── branches
+│   │   ├── COMMIT_EDITMSG
+│   │   ├── config
+│   │   ├── description
+│   │   ├── FETCH_HEAD
+│   │   ├── HEAD
+│   │   ├── hooks
+│   │   │   ├── applypatch-msg.sample
+│   │   │   ├── commit-msg.sample
+│   │   │   ├── fsmonitor-watchman.sample
+│   │   │   ├── post-update.sample
+│   │   │   ├── pre-applypatch.sample
+│   │   │   ├── pre-commit.sample
+│   │   │   ├── pre-merge-commit.sample
+│   │   │   ├── prepare-commit-msg.sample
+│   │   │   ├── pre-push.sample
+│   │   │   ├── pre-rebase.sample
+│   │   │   ├── pre-receive.sample
+│   │   │   ├── push-to-checkout.sample
+│   │   │   └── update.sample
+│   │   ├── index
+│   │   ├── info
+│   │   │   └── exclude
+│   │   ├── logs
+│   │   │   ├── HEAD
+│   │   │   └── refs
+│   │   │       ├── heads
+│   │   │       │   └── main
+│   │   │       └── remotes
+│   │   │           └── origin
+│   │   │               └── main
+│   │   ├── objects
+│   │   │   ├── 00
+│   │   │   │   └── 4841f2d148dd2517abc0f246b1b3d5f0cf7ce9
+│   │   │   ├── 01
+│   │   │   │   └── 69b6d8694f352c633ba044c29f180f2ef62f3b
+│   │   │   ├── 03
+│   │   │   │   ├── 1c8aea7af36c5d52725dff6ee672e5625bc2f9
+│   │   │   │   ├── 3bbf42a0d01fa1d8f0b3e6f6c8a797a2046aec
+│   │   │   │   └── ca63d5821c901625d9c3cde50a1d0f1997c84d
+│   │   │   ├── 04
+│   │   │   │   ├── 4894e4ff3b2121734a8d6ba5a82425d388edf7
+│   │   │   │   └── df2b6f04f43227e3033087db2fcab8da1ebe3d
+│   │   │   ├── 06
+│   │   │   │   ├── 14786b6ca53726b17a4400fd1a47ca15664278
+│   │   │   │   └── 95af9fc3fcd99e4cca99e0a27ed1e303c0d79d
+│   │   │   ├── 0c
+│   │   │   │   └── 53f6cd79ce5da2f98249fd3168b4ef3ffff9fb
+│   │   │   ├── 0d
+│   │   │   │   └── 3e13783b6505757dc73f6b3599714bdd63effe
+│   │   │   ├── 10
+│   │   │   │   └── c37937fa29536503fdf0e51f911509e3ca4d40
+│   │   │   ├── 13
+│   │   │   │   └── a6e531f015c9b17131f18db249ff844efdc4f4
+│   │   │   ├── 14
+│   │   │   │   └── 78ea4e1fa7631694ba9268eacd825aafcd985c
+│   │   │   ├── 15
+│   │   │   │   └── 00b6118287de3cbd811030753105acef15eb21
+│   │   │   ├── 17
+│   │   │   │   └── afd93c936b1bf1e8277b915cb99dec2cd0c652
+│   │   │   ├── 18
+│   │   │   │   └── e1b370d60d533ce8d410f1b6fde2b7f53a354c
+│   │   │   ├── 19
+│   │   │   │   └── e6faaf4059fea4508d38744ff7fded55f1fcac
+│   │   │   ├── 1d
+│   │   │   │   └── 5566016d1cb235d68b08d85892ea8842e74044
+│   │   │   ├── 1f
+│   │   │   │   ├── 1df53c2d2a3b78d3de248b1fcc2e00484647f6
+│   │   │   │   └── d7bd0ab3750a2edce78d382be3bf5ece367d08
+│   │   │   ├── 21
+│   │   │   │   └── c6f7d42b1b832a65ecb6533d635fb12fb74c7d
+│   │   │   ├── 24
+│   │   │   │   ├── 0d12dc1d4a1101c1aba43de758100ba52b1507
+│   │   │   │   └── 2bbe562fc0401b7881b579e51ed89cd25150b7
+│   │   │   ├── 25
+│   │   │   │   ├── 13d8f580ee9eb4d917408f3803e0b8399f2b67
+│   │   │   │   ├── 2665681431290cd159773c9f08ed2cd05a24bb
+│   │   │   │   └── 5323fa1c093c363cd0520ce1503431febb50ce
+│   │   │   ├── 29
+│   │   │   │   ├── 09f2cec5651a39cbfc9dd000f8340acf03e57d
+│   │   │   │   └── 29fd1067c3c9c7551b8c0a4118b185e7779be8
+│   │   │   ├── 2b
+│   │   │   │   └── 111794a1c1922a4fc9b318b7ae63811d64188e
+│   │   │   ├── 2c
+│   │   │   │   ├── 8be520af2d91bffca5640c0e24989b237c5406
+│   │   │   │   ├── 8f38b138bd9d9be4f9d58b6e028793b66a6417
+│   │   │   │   └── bea52a71b2e5b745574ccef58c5884443540c3
+│   │   │   ├── 2f
+│   │   │   │   └── e157fed9e28b449a06ad26f5a66d994b872e53
+│   │   │   ├── 33
+│   │   │   │   └── f3ac74fb255cd78aa17bf5d631ead332bcfea8
+│   │   │   ├── 36
+│   │   │   │   ├── d354174c46d6fc86ef01cbbccfdd93ed1ad677
+│   │   │   │   └── deb81b9ad07d5842f575dd223b233e1524c5cb
+│   │   │   ├── 37
+│   │   │   │   ├── 29dd33197eb792bf6aaba2f14a815fece7ba63
+│   │   │   │   └── 887367915b6f06520dd3b66997cf992e6b7def
+│   │   │   ├── 3a
+│   │   │   │   ├── 56b28132e0cf34839acef0f5bfcdd3592a5907
+│   │   │   │   └── cd704cefdb79801b4f7cf779fd37dac2c1ba99
+│   │   │   ├── 3b
+│   │   │   │   └── 1ff87973d4d689b4e16004e1a80db84ba814ad
+│   │   │   ├── 3d
+│   │   │   │   └── 2d2c19364b39775b7aba82debdfe52448cf062
+│   │   │   ├── 3e
+│   │   │   │   ├── 5ef969cbedd35cd810e137d8bb33dfdfbae053
+│   │   │   │   └── d326895827c5328657d66a44efa07718b50b06
+│   │   │   ├── 3f
+│   │   │   │   ├── 06d60e32a0cae5cecef59382e0815f55c27371
+│   │   │   │   ├── 7d0915da2b1b0dca2397f3b3b7fcd31693029f
+│   │   │   │   ├── 7e516ef23a72ba4cc3807ee4283f74f79c206e
+│   │   │   │   └── b26afd4779f463f58ca73dd12a0f81dacc81bd
+│   │   │   ├── 47
+│   │   │   │   ├── 0a0f9f0e0fad551b817e72b9deffb0fdd7d29e
+│   │   │   │   ├── 1a0fe02a8fa1d47775ef6f782e836feb22e673
+│   │   │   │   └── 93dbb8e69885f80ba1b22a33aeb8ebfe1900fe
+│   │   │   ├── 4a
+│   │   │   │   ├── 6846cc348678ccff26eb16975a89f9604673dc
+│   │   │   │   └── 7ea642d4f3ea82ea3204c37f193046e9eefc61
+│   │   │   ├── 4d
+│   │   │   │   └── 686148e7dffaad9c6babb96a762272dcde456b
+│   │   │   ├── 50
+│   │   │   │   └── 54c45b53f7c91d968a105487ba4c9748535687
+│   │   │   ├── 53
+│   │   │   │   └── 86a42a2c9634e9f6cd7fb9f09be2aba9cbb792
+│   │   │   ├── 54
+│   │   │   │   └── 54b48b1fb32f71fd5ca737396c4613a97e8e66
+│   │   │   ├── 5b
+│   │   │   │   └── 9b033d81a438b836dba4c199e5efe89da25634
+│   │   │   ├── 5c
+│   │   │   │   ├── 3802a5e9afa02d4fc914d9cb2b6cae4ed57c7d
+│   │   │   │   └── 4c7c4a52fc724cd65a20f735d1a1030a1c1ea1
+│   │   │   ├── 5d
+│   │   │   │   └── 715b0d2a30a3ad77074e413112278ff9590002
+│   │   │   ├── 5e
+│   │   │   │   └── bcf086bb71e7199910d428dec3f4a7bf7a8ed0
+│   │   │   ├── 5f
+│   │   │   │   ├── 75daeeba49b6d16c45f1ab6e9224ca57fd34e7
+│   │   │   │   └── a397514e37a18ad7a4920d84a03c380c028644
+│   │   │   ├── 60
+│   │   │   │   └── 49eaddb8e048f910da144fd4dfb851f6840acf
+│   │   │   ├── 62
+│   │   │   │   ├── 1ab9fbdf53cfd7f0bbd5b168cc307356db9a7d
+│   │   │   │   ├── 58d4426ac2c8691c5563f8b9e70b71a24fcd08
+│   │   │   │   └── 6799f0f85326a8c1fc522db584e86cdfccd51f
+│   │   │   ├── 63
+│   │   │   │   └── a58773d6ba779d1c5eed7850721b5fe875eaec
+│   │   │   ├── 66
+│   │   │   │   ├── df3c8a960bbbb48ac6293f06a3790c5cfc6c07
+│   │   │   │   └── e2ffdd28ca3755f2e8a82eac20653752e0ecba
+│   │   │   ├── 67
+│   │   │   │   └── d85a81c7ce1eed2bd345063a138a1447085edb
+│   │   │   ├── 6a
+│   │   │   │   ├── 31c03d92623931140e08a4a4db6c4333acdb89
+│   │   │   │   └── 4b11a67c6919990afe6d0b793957f8d08f15a7
+│   │   │   ├── 6d
+│   │   │   │   └── 0538fe7aefdc4a72a684dc7de601663f1c40d9
+│   │   │   ├── 6e
+│   │   │   │   └── e80d334580883946d45d6e38d00efe7dfaf0f0
+│   │   │   ├── 6f
+│   │   │   │   └── 91b8c8c99cc2af9f1da4dfe134cae3ebd5c24d
+│   │   │   ├── 70
+│   │   │   │   └── 049d27824f17462a47090d8db4c83034c87104
+│   │   │   ├── 74
+│   │   │   │   └── 37034053227fcaafc8e4cce1832db66197be91
+│   │   │   ├── 76
+│   │   │   │   ├── 73b6ae3790abf2a9605baee5ce8223fea169fb
+│   │   │   │   └── dfaa808c18832f3745fa5b143fa8f1bc1b1c52
+│   │   │   ├── 78
+│   │   │   │   ├── 4141bc21bd69b1737a135d907023d3fe1624bd
+│   │   │   │   └── b7301a561ac079cf13f3f22af5c01fcb4f8994
+│   │   │   ├── 7b
+│   │   │   │   └── 0607c3999f2613f034870bb95fb4e686259506
+│   │   │   ├── 7d
+│   │   │   │   └── 6b787a67089af4bd70079f396765f573325373
+│   │   │   ├── 7e
+│   │   │   │   ├── 66039354d5397f99c32f60d0e88e719d1ccc5e
+│   │   │   │   └── 764ebf3ac0faff2f9df62111a6e546939a7d81
+│   │   │   ├── 7f
+│   │   │   │   └── 34f0aed9d83499c15793c0c36c2c29f27cb505
+│   │   │   ├── 82
+│   │   │   │   ├── a33a1caa6ed8b52d37fb422446ccaa3928b6db
+│   │   │   │   └── f3216c69690a8025daa91534e0e2926c55b97b
+│   │   │   ├── 84
+│   │   │   │   └── fe036ac8968c07079aae61896ab3af368d07a2
+│   │   │   ├── 86
+│   │   │   │   └── 47a1e2fef06e993a805857e77665b3c0bcae9b
+│   │   │   ├── 87
+│   │   │   │   ├── 064460b201fac86a5ab68c282992572e6745ca
+│   │   │   │   └── 5c2348f17683288fde2fb2970ec4ac5b12177a
+│   │   │   ├── 88
+│   │   │   │   ├── 82ff2d2997c99ad8d9a7cc8a24a7e71c510871
+│   │   │   │   ├── acd9b35c5dab4eed9108a876c297b9521eacc4
+│   │   │   │   └── fa840ba2b758a9ffcd9a17d066df06d5b8ac6a
+│   │   │   ├── 8c
+│   │   │   │   └── 6464d5ac530a9c0f086a2f24ca6668c7c062ac
+│   │   │   ├── 90
+│   │   │   │   └── 6a57c491b925bfc894792ee7f55a60f443ce24
+│   │   │   ├── 91
+│   │   │   │   └── 448d6de015f37bd3647b3e798c47dbedf1b015
+│   │   │   ├── 92
+│   │   │   │   ├── 523fe49cda23a7073459478e4d71c0c13d25d6
+│   │   │   │   └── 8c20354e3041c5a1e2655c066ffbe8d49ed7c8
+│   │   │   ├── 93
+│   │   │   │   └── 5c2acb76a8a0a2ffe706d02838447e13ccbe07
+│   │   │   ├── 95
+│   │   │   │   └── b4ab38103528a24c6cec6f2455c77c45369dbe
+│   │   │   ├── 99
+│   │   │   │   ├── 37d3367bfa22ceec6ad8d94cf0c1532e2a63b7
+│   │   │   │   ├── 7e15c9a5688cee485e9268066080ca5964d0e7
+│   │   │   │   └── 9385691ccbc6709081a610b9ae5f1840deef13
+│   │   │   ├── 9a
+│   │   │   │   └── 9f171d37c87b8e8c04be57cd48bf51b702d7e3
+│   │   │   ├── 9c
+│   │   │   │   └── 6b73071302f2dcdb75af3550e397a2021be7d7
+│   │   │   ├── 9e
+│   │   │   │   └── 10677a40df4ae9b6c38ad18688b90c1595a8f2
+│   │   │   ├── 9f
+│   │   │   │   └── 1437ae627a09c79222a588247d13f7959693fe
+│   │   │   ├── a0
+│   │   │   │   ├── aa040331b17d17e67e239c1d61ec32c8be7e01
+│   │   │   │   └── bef59cf1b2cba4e0e3cae7ed950f5ac356874f
+│   │   │   ├── a1
+│   │   │   │   └── f6d193af84ecef6d65e8d2fd33eeb20567894b
+│   │   │   ├── a6
+│   │   │   │   └── 7c3047ebe150800794580a043b3ca5cb5e1ade
+│   │   │   ├── a9
+│   │   │   │   └── c133268b73e3666eed26ef3a5f466f854fe16b
+│   │   │   ├── ab
+│   │   │   │   └── f4194d2e7772026f42b71c3d237dce2daea304
+│   │   │   ├── ac
+│   │   │   │   └── 0cb7e49c206ab8a12b88fa24fde022eb9ef0e3
+│   │   │   ├── ae
+│   │   │   │   ├── 69824d8a455b8f00855444fe09e53a9539d3d4
+│   │   │   │   └── cb1556004e02aa5afc61263f25d0ae96552589
+│   │   │   ├── b2
+│   │   │   │   └── fb934249d53bb476fb897dec8f3e785f2aef07
+│   │   │   ├── b3
+│   │   │   │   ├── a2b108b1263df653096fd0febfd52c3a5cbda4
+│   │   │   │   └── c830c497120aa340d568bd05e36ccd68c3e8b8
+│   │   │   ├── b4
+│   │   │   │   └── 38e229a920a33031f481be28875ba05e977671
+│   │   │   ├── b6
+│   │   │   │   └── f4354ac73fa3bcf6c9d834f278057b6bd1743b
+│   │   │   ├── b7
+│   │   │   │   └── 673c06ca38302daefee22c1dab7884d549db52
+│   │   │   ├── b8
+│   │   │   │   └── 507e62921210dfcf6f15b45fc6f19751dae271
+│   │   │   ├── b9
+│   │   │   │   └── f7b0b757329ca09303d4d1769fa95c7cfa3072
+│   │   │   ├── bb
+│   │   │   │   └── 842fc326f14702ae403930bf5d524404d2d789
+│   │   │   ├── bc
+│   │   │   │   ├── 0c04ad6cbee5fb7a0d556b26625e87680c8b2b
+│   │   │   │   ├── 259d374459566b78f42c5e97277611fbaaa0ab
+│   │   │   │   └── 49ead34c1481d7c1d385d7293a50845c549a23
+│   │   │   ├── bd
+│   │   │   │   └── c25bccfc9dfb926b9878a5a9337b68d74e8f37
+│   │   │   ├── c2
+│   │   │   │   ├── 3dce400a851147c7b7978541b14cf09958f17b
+│   │   │   │   └── 7475f2b6ee89dcb5998e8d4f81ef5323f6c190
+│   │   │   ├── c3
+│   │   │   │   └── d9f2407417795889250717d7b519eadd8373e6
+│   │   │   ├── c5
+│   │   │   │   └── 9fb5c95c1cd5447c17dea9cb35595e74bd39c6
+│   │   │   ├── c6
+│   │   │   │   ├── 128f0531641566c288434125696eeed0c4781b
+│   │   │   │   └── 188f9bc518cbd4e906c43a2e0f77715e3b7dc3
+│   │   │   ├── c7
+│   │   │   │   └── f1b595339c386be5db00a95e7040745efd7864
+│   │   │   ├── c8
+│   │   │   │   └── e9deea144bbba9cd2ebc766fc2872f8584662a
+│   │   │   ├── ca
+│   │   │   │   └── a2a457fecd167acffe84b48c477a054b5f00b9
+│   │   │   ├── cb
+│   │   │   │   └── 6390e37a67a75bde36cc482a89f3b5c49ddc1c
+│   │   │   ├── cc
+│   │   │   │   └── aa7aad28da73a2da44ec64fd9599580ac1ea80
+│   │   │   ├── cd
+│   │   │   │   └── e21f9b30e1d5c44278edfdd3a26c16b24b9f63
+│   │   │   ├── ce
+│   │   │   │   └── 0f7c5ebabeff77a955c2b2bcd49d0b82dfb2e5
+│   │   │   ├── cf
+│   │   │   │   └── 7d407c8a34a4846af96619a316bc175b904a34
+│   │   │   ├── d1
+│   │   │   │   ├── 98cfecd41d8fcfad27bb8ff12e0f7a89a3f894
+│   │   │   │   └── d1815e6e3f6baf9c54207a8556f670b04ef1c5
+│   │   │   ├── d2
+│   │   │   │   ├── 08cd0f8d46db79ab135d54cf8ead552230623f
+│   │   │   │   └── 9a7dd3fec21c909ae60cd35f7e1db6534a0d91
+│   │   │   ├── d3
+│   │   │   │   └── 832ac3f28e4e1afeefa58000df2998795d3da9
+│   │   │   ├── d8
+│   │   │   │   └── 14d8137484de1e4910a7c2724da96ffcc46d96
+│   │   │   ├── d9
+│   │   │   │   └── 0bb1321f3ac071516493a893a23cdbae609ea8
+│   │   │   ├── da
+│   │   │   │   ├── cb7ab9905e3beb26e1b9b9d68c4794bcad9607
+│   │   │   │   └── d1fffbbe7a7a4338ec830e48419d0ad6005014
+│   │   │   ├── db
+│   │   │   │   ├── c143f81df0448d34430c6c535208848731751d
+│   │   │   │   ├── d16160e5c130b71ada9ac65e2ca55f2fb22504
+│   │   │   │   └── d45ce3bf24332ed1c24d97e8fa5a2e0859e2d7
+│   │   │   ├── dc
+│   │   │   │   ├── 67722167385ba18bf4e46259fb9d990acd29fb
+│   │   │   │   └── c6977779afb94befa253fa47959861b2224c13
+│   │   │   ├── dd
+│   │   │   │   ├── 44f266a4ac2a8fb7c1c0bbee992cbc339b3171
+│   │   │   │   └── fe18448eba1b95aec0dfd22e3d450411ac60fc
+│   │   │   ├── de
+│   │   │   │   └── a1a4d681c7ec6cc0605f751d943ef7c2c73934
+│   │   │   ├── df
+│   │   │   │   └── 12728251757be440c70b39a990636989f30d01
+│   │   │   ├── e1
+│   │   │   │   ├── 4d139875991ee4180b86444883ef3a16dbab17
+│   │   │   │   ├── ac67886dacb6ed6fc7bb6380e41360cba89a71
+│   │   │   │   └── cd4a3dd9765408d5ef8b6e8938e2addd91d9a0
+│   │   │   ├── e3
+│   │   │   │   ├── 10f38fa45054fc4be46b6e342c48f51aa39fcd
+│   │   │   │   └── fc3d90110dbb0ef202f51b7a0a0cc37efff4f4
+│   │   │   ├── e6
+│   │   │   │   ├── 2ee6ebf5b06543255296e23575606c6b7f510c
+│   │   │   │   └── 9de29bb2d1d6434b8b29ae775ad8c2e48c5391
+│   │   │   ├── e7
+│   │   │   │   ├── 2adc6f1e4d8721feff77feb5ca9860ef13fdf7
+│   │   │   │   └── b1d8dbafe45d43d2f6565682411b3f6a429da7
+│   │   │   ├── e8
+│   │   │   │   └── b1f21181a36573dfcb8e677c7d2287de439d9b
+│   │   │   ├── e9
+│   │   │   │   └── 91172329d7d8009d96c8ed7932dd15fdf1f081
+│   │   │   ├── ea
+│   │   │   │   └── a6f4b59c3ffc8d13ad0a3094e594bf1468e44f
+│   │   │   ├── ed
+│   │   │   │   ├── 0bbd60a8a1bddda323a890854a84a9000a678b
+│   │   │   │   └── e379c20c872c359ec444fa50e7992fa18eca23
+│   │   │   ├── ee
+│   │   │   │   └── b69a4b1941873208ff40448eee07a5f639d1df
+│   │   │   ├── f2
+│   │   │   │   └── 72433084eaf6fbd6e3c26b877dd966d85b4c9c
+│   │   │   ├── f7
+│   │   │   │   └── 3399bdb6f9e2db36db7c5dca24fa9bd30b1d9f
+│   │   │   ├── f8
+│   │   │   │   ├── 4a65953cf40d9c873412fa00ee3c0a03105e2d
+│   │   │   │   ├── 8a324c331d8a83228b6201a67fb3ca33f715d5
+│   │   │   │   └── 9cfe9fc6c5a00e61cc37769440d89adb4688e3
+│   │   │   ├── fa
+│   │   │   │   ├── 804689eef7c090a7f1b36b105da8096d9d0ade
+│   │   │   │   └── c97ffec34b21b3ff04073d9cd7dd648c553155
+│   │   │   ├── fc
+│   │   │   │   ├── 151ed80f193ea8652f7b8e2347292b17822108
+│   │   │   │   └── d45e8f66fe11712e123512cd604937a454dc53
+│   │   │   ├── ff
+│   │   │   │   └── 09a5805d6aa1087e5339b008e1df36f06408e5
+│   │   │   ├── info
+│   │   │   └── pack
+│   │   ├── ORIG_HEAD
+│   │   ├── packed-refs
+│   │   ├── REBASE_HEAD
+│   │   └── refs
+│   │       ├── heads
+│   │       │   └── main
+│   │       ├── remotes
+│   │       │   └── origin
+│   │       │       └── main
+│   │       └── tags
+│   │           └── v3.0.0
+│   ├── .gitattributes
+│   ├── .gitignore
+│   ├── instant-remote-storage_4.2.0-3
+│   ├── instant-remote-storage_4.2.0.orig.tar.gz
+│   ├── instant-remote-storage.sh
+│   ├── lib
+│   │   └── irs_recovery.sh
+│   ├── LICENSE
+│   ├── mime_map.sh
+│   ├── README.md
+│   ├── scripts
+│   │   └── irs-setup
+│   ├── systemd
+│   │   ├── system
+│   │   │   └── instant-remote-storage@.service
+│   │   └── user
+│   │       └── instant-remote-storage@.service
+│   └── x.txt
+├── instant-remote-storage-3.0.0
+│   ├── CHANGELOG.md
+│   ├── CONTRIBUTING.md
+│   ├── debian
+│   │   ├── changelog
+│   │   ├── control
+│   │   ├── copyright
+│   │   ├── docs
+│   │   │   └── README.Debian
+│   │   ├── install
+│   │   ├── irs-setup
+│   │   ├── man
+│   │   │   ├── instant-remote-storage.1
+│   │   │   └── irs-setup.8
+│   │   ├── manpages
+│   │   ├── patches
+│   │   │   ├── 0001-core-skip-unchanged-files-on-restart-by-id-path-hash.patch
+│   │   │   └── series
+│   │   ├── rules
+│   │   ├── source
+│   │   │   └── format
+│   │   ├── systemd
+│   │   │   └── instant-remote-storage@.service
+│   │   ├── upstream
+│   │   │   ├── metadata
+│   │   │   └── signing-key.asc
+│   │   ├── watch
+│   │   └── wrapper
+│   │       └── instant-remote-storage
+│   ├── instant-remote-storage.sh
+│   ├── lib
+│   │   └── irs_recovery.sh
+│   ├── LICENSE
+│   ├── mime_map.sh
+│   ├── .pc
+│   │   ├── 0001-core-skip-unchanged-files-on-restart-by-id-path-hash.patch
+│   │   │   ├── CONTRIBUTING.md
+│   │   │   ├── instant-remote-storage.sh
+│   │   │   └── README.md
+│   │   ├── applied-patches
+│   │   ├── .quilt_patches
+│   │   ├── .quilt_series
+│   │   └── .version
+│   ├── README.md
+│   ├── scripts
+│   │   └── irs-setup
+│   └── systemd
+│       ├── system
+│       │   └── instant-remote-storage@.service
+│       └── user
+│           └── instant-remote-storage@.service
+├── instant-remote-storage_3.0.0-13_all.deb
+├── instant-remote-storage_3.0.0-14.debian.tar.xz
+├── instant-remote-storage_3.0.0-14.dsc
+├── instant-remote-storage_3.0.0-14_source.build
+├── instant-remote-storage_3.0.0-14_source.buildinfo
+├── instant-remote-storage_3.0.0-14_source.changes
+├── instant-remote-storage_3.0.0-14_source.mentors.upload
+├── instant-remote-storage_3.0.0.orig.tar.gz
+├── instant-remote-storage_3.1.0-2.debian.tar.xz
+├── instant-remote-storage_3.1.0-2.dsc
+├── instant-remote-storage_3.1.0.orig.tar.gz
+├── instant-remote-storage_4.2.0-1_all.deb -> /home/carlo/agenda_quotidiana/flow-devops/set-up-macchina-locale/backup-smart/backup-smart_personalizzato/irs_dist/instant-remote-storage_4.2.0-1/instant-remote-storage_4.2.0-1_all.deb
+├── instant-remote-storage_4.2.0-1_amd64.buildinfo -> /home/carlo/agenda_quotidiana/flow-devops/set-up-macchina-locale/backup-smart/backup-smart_personalizzato/irs_dist/instant-remote-storage_4.2.0-1/instant-remote-storage_4.2.0-1_amd64.buildinfo
+├── instant-remote-storage_4.2.0-1.debian.tar.xz -> /home/carlo/agenda_quotidiana/flow-devops/set-up-macchina-locale/backup-smart/backup-smart_personalizzato/irs_dist/instant-remote-storage_4.2.0-1/instant-remote-storage_4.2.0-1.debian.tar.xz
+├── instant-remote-storage_4.2.0-1.dsc -> /home/carlo/agenda_quotidiana/flow-devops/set-up-macchina-locale/backup-smart/backup-smart_personalizzato/irs_dist/instant-remote-storage_4.2.0-1/instant-remote-storage_4.2.0-1.dsc
+├── instant-remote-storage_4.2.0.orig.tar.gz
+├── instant-storage_logica-settore-conflitti-locali-e-remoti
+├── irs_confronto_versioni
+│   ├── instant-remote-storage (copia).sh
+│   └── instant-remote-storage.sh
+├── irs_ definitivo
+│   ├── instant-remote-storage.sh
+│   ├── lib
+│   │   └── irs_recovery.sh
+│   └── proveniente_da_usr-lib-mauguale-allaltro
+│       ├── instant-remote-storage.sh
+│       ├── lib
+│       │   └── irs_recovery.sh
+│       └── mime_map.sh
+├── irs_dist
+│   ├── instant-remote-storage_3.0.0-14
+│   │   ├── instant-remote-storage_3.0.0-14_all.deb
+│   │   ├── instant-remote-storage_3.0.0-14_amd64.build
+│   │   ├── instant-remote-storage_3.0.0-14_amd64.buildinfo
+│   │   ├── instant-remote-storage_3.0.0-14_amd64.changes
+│   │   ├── instant-remote-storage_3.0.0-14.debian.tar.xz
+│   │   ├── instant-remote-storage_3.0.0-14.dsc
+│   │   ├── instant-remote-storage_3.0.0-14_source.build
+│   │   ├── instant-remote-storage_3.0.0-14_source.buildinfo
+│   │   ├── instant-remote-storage_3.0.0-14_source.changes
+│   │   ├── instant-remote-storage_3.0.0-14_source.mentors.upload
+│   │   └── instant-remote-storage_3.0.0.orig.tar.gz
+│   ├── instant-remote-storage_4.2.0-1
+│   │   ├── instant-remote-storage_4.2.0-1_all.deb
+│   │   ├── instant-remote-storage_4.2.0-1_amd64.buildinfo
+│   │   ├── instant-remote-storage_4.2.0-1_amd64.changes
+│   │   ├── instant-remote-storage_4.2.0-1.debian.tar.xz
+│   │   ├── instant-remote-storage_4.2.0-1.dsc
+│   │   ├── instant-remote-storage_4.2.0-1_source.changes
+│   │   └── instant-remote-storage_4.2.0.orig.tar.gz
+│   ├── instant-remote-storage_4.2.0-2
+│   │   ├── instant-remote-storage_4.2.0-2_all.deb
+│   │   ├── instant-remote-storage_4.2.0-2_amd64.buildinfo
+│   │   ├── instant-remote-storage_4.2.0-2_amd64.changes
+│   │   ├── instant-remote-storage_4.2.0-2.debian.tar.xz
+│   │   ├── instant-remote-storage_4.2.0-2.dsc
+│   │   ├── instant-remote-storage_4.2.0-2_source.changes
+│   │   └── instant-remote-storage_4.2.0.orig.tar.gz -> /home/carlo/agenda_quotidiana/flow-devops/set-up-macchina-locale/backup-smart/backup-smart_personalizzato/irs_dist/instant-remote-storage_4.2.0-1/instant-remote-storage_4.2.0.orig.tar.gz
+│   ├── instant-remote-storage_4.2.0-3
+│   │   ├── bin
+│   │   └── src
+│   │       ├── instant-remote-storage_4.2.0-3.debian.tar.xz -> /home/carlo/agenda_quotidiana/flow-devops/set-up-macchina-locale/backup-smart/backup-smart_personalizzato/irs_dist/instant-remote-storage_4.2.0-3/instant-remote-storage_4.2.0-3.debian.tar.xz
+│   │       ├── instant-remote-storage_4.2.0-3.dsc -> /home/carlo/agenda_quotidiana/flow-devops/set-up-macchina-locale/backup-smart/backup-smart_personalizzato/irs_dist/instant-remote-storage_4.2.0-3/instant-remote-storage_4.2.0-3.dsc
+│   │       └── instant-remote-storage_4.2.0.orig.tar.gz -> /home/carlo/agenda_quotidiana/flow-devops/set-up-macchina-locale/backup-smart/backup-smart_personalizzato/irs_dist/pool/upstream/instant-remote-storage_4.2.0.orig.tar.gz
+│   ├── latest -> /home/carlo/agenda_quotidiana/flow-devops/set-up-macchina-locale/backup-smart/backup-smart_personalizzato/irs_dist/instant-remote-storage_4.2.0-3
+│   └── pool
+│       └── upstream
+│           └── instant-remote-storage_4.2.0.orig.tar.gz
+├── irs-makefile-e-mappa_deb
+│   ├── Makefile
+│   └── struttura-progetto-deb.md
+├── l-i-2.txt
+├── l-i-3.txt
+├── l-i.txt
+├── log-salvati-di-instant-rem-storage
+│   ├── l-i-2.txt
+│   ├── l-i-3.txt
+│   └── l-i.txt
+├── OLD_instant-remote-storage
+│   ├── CHANGELOG.md
+│   ├── debian
+│   │   ├── changelog
+│   │   ├── control
+│   │   ├── copyright
+│   │   ├── .debhelper
+│   │   │   └── generated
+│   │   │       ├── instant-remote-storage
+│   │   │       │   ├── dh_installchangelogs.dch.trimmed
+│   │   │       │   ├── installed-by-dh_install
+│   │   │       │   ├── installed-by-dh_installdocs
+│   │   │       │   └── installed-by-dh_installman
+│   │   │       └── _source
+│   │   │           └── home
+│   │   ├── debhelper-build-stamp
+│   │   ├── docs
+│   │   │   └── README.Debian
+│   │   ├── files
+│   │   ├── install
+│   │   ├── instant-remote-storage
+│   │   │   ├── DEBIAN
+│   │   │   │   ├── control
+│   │   │   │   └── md5sums
+│   │   │   ├── lib
+│   │   │   │   └── systemd
+│   │   │   │       └── system
+│   │   │   │           └── instant-remote-storage@.service
+│   │   │   └── usr
+│   │   │       ├── bin
+│   │   │       │   └── instant-remote-storage
+│   │   │       ├── lib
+│   │   │       │   └── instant-remote-storage
+│   │   │       │       ├── instant-remote-storage.sh
+│   │   │       │       ├── lib
+│   │   │       │       │   └── irs_recovery.sh
+│   │   │       │       └── mime_map.sh
+│   │   │       ├── sbin
+│   │   │       │   └── irs-setup
+│   │   │       └── share
+│   │   │           ├── doc
+│   │   │           │   └── instant-remote-storage
+│   │   │           │       ├── changelog.Debian.gz
+│   │   │           │       ├── changelog.gz
+│   │   │           │       ├── copyright
+│   │   │           │       └── README.Debian
+│   │   │           └── man
+│   │   │               ├── man1
+│   │   │               │   └── instant-remote-storage.1.gz
+│   │   │               └── man8
+│   │   │                   └── irs-setup.8.gz
+│   │   ├── instant-remote-storage.substvars
+│   │   ├── irs-setup
+│   │   ├── man
+│   │   │   ├── instant-remote-storage.1
+│   │   │   └── irs-setup.8
+│   │   ├── manpages
+│   │   ├── rules
+│   │   ├── source
+│   │   │   └── format
+│   │   ├── systemd
+│   │   │   └── instant-remote-storage@.service
+│   │   ├── upstream
+│   │   │   ├── metadata
+│   │   │   └── signing-key.asc
+│   │   ├── watch
+│   │   └── wrapper
+│   │       └── instant-remote-storage
+│   ├── .git
+│   │   ├── branches
+│   │   ├── COMMIT_EDITMSG
+│   │   ├── config
+│   │   ├── description
+│   │   ├── FETCH_HEAD
+│   │   ├── HEAD
+│   │   ├── hooks
+│   │   │   ├── applypatch-msg.sample
+│   │   │   ├── commit-msg.sample
+│   │   │   ├── fsmonitor-watchman.sample
+│   │   │   ├── post-update.sample
+│   │   │   ├── pre-applypatch.sample
+│   │   │   ├── pre-commit.sample
+│   │   │   ├── pre-merge-commit.sample
+│   │   │   ├── prepare-commit-msg.sample
+│   │   │   ├── pre-push.sample
+│   │   │   ├── pre-rebase.sample
+│   │   │   ├── pre-receive.sample
+│   │   │   ├── push-to-checkout.sample
+│   │   │   └── update.sample
+│   │   ├── index
+│   │   ├── info
+│   │   │   └── exclude
+│   │   ├── logs
+│   │   │   ├── HEAD
+│   │   │   └── refs
+│   │   │       ├── heads
+│   │   │       │   └── main
+│   │   │       └── remotes
+│   │   │           └── origin
+│   │   │               └── main
+│   │   ├── lost-found
+│   │   │   └── other
+│   │   │       ├── 11acf14f379b0e1a13335f2f7cb5a1408fd7e61d
+│   │   │       └── 9c8e1d8bb91056e52c5cd04a2893ee4d50a5573c
+│   │   ├── objects
+│   │   │   ├── 00
+│   │   │   │   ├── 1e32eee42c59b418d8f920339d9eeaae497048
+│   │   │   │   ├── 2bfd7e524bede5b564ba7eac43fe1a014c7a78
+│   │   │   │   └── 6aa1beb8b1413d8694e52529bd32a8f2b84ddc
+│   │   │   ├── 01
+│   │   │   │   └── a46d715ac085d8fc2e786c4b857e493145b260
+│   │   │   ├── 03
+│   │   │   │   ├── 1c8aea7af36c5d52725dff6ee672e5625bc2f9
+│   │   │   │   └── 90315c85b36f40154a0452e873a4e12d7918ec
+│   │   │   ├── 06
+│   │   │   │   └── 906f55022b37ed6a77b29c0c2e3aba719e115b
+│   │   │   ├── 0c
+│   │   │   │   └── 1b5cc2c4a9239512a8d8ca3977071d3076542f
+│   │   │   ├── 11
+│   │   │   │   ├── 6cb78e8298f76fa3959283f421342aebb4a2ee
+│   │   │   │   ├── 8c54c2effafb60d5f88c5c4af6e7f5d90e185f
+│   │   │   │   └── acf14f379b0e1a13335f2f7cb5a1408fd7e61d
+│   │   │   ├── 13
+│   │   │   │   └── 1eae07819dde849602d830b561d163b8354ee8
+│   │   │   ├── 14
+│   │   │   │   ├── 309650e46bcf77d2c88ce7ff183099fd85f495
+│   │   │   │   ├── 680961b3d3c45cbfd2a0bbfb87f5815d95c7e2
+│   │   │   │   └── eda3898976e4e2c49bcf8da700c0a0807385ee
+│   │   │   ├── 15
+│   │   │   │   └── 7cbeb0ae0dccdf2aaa8c23a166e4affe8d98f5
+│   │   │   ├── 18
+│   │   │   │   └── d8f37ae8a56ac57690a1e96e259d0f467a690f
+│   │   │   ├── 19
+│   │   │   │   ├── 03ab8e99e91f204c61296b92dca20f5207979f
+│   │   │   │   └── 7eaefc6579de05e73862e36190273f47b4f8e9
+│   │   │   ├── 1a
+│   │   │   │   ├── 8957ff857962c00c8254765a682aca6c10e556
+│   │   │   │   └── da6604f97556e23dbc97f75696aa44c93489e3
+│   │   │   ├── 1c
+│   │   │   │   └── a1ee75e4a145b154344dd73bb0d33afbf47499
+│   │   │   ├── 1d
+│   │   │   │   └── 5566016d1cb235d68b08d85892ea8842e74044
+│   │   │   ├── 1e
+│   │   │   │   ├── 2d0894fb18bdba361857a3fe57c006047b8904
+│   │   │   │   └── 41dca138ecaad822468904fafa456981a2d4c2
+│   │   │   ├── 1f
+│   │   │   │   └── 7decb8c7798805ef298f539a06b18e461595c2
+│   │   │   ├── 21
+│   │   │   │   ├── 433269e86089fec488ecd609776fb3af6ac6fd
+│   │   │   │   ├── 5137cd23ecf0575feb6964b8f7256ff39e5366
+│   │   │   │   ├── 861de5d7995646163859825ee232f3d9181bc2
+│   │   │   │   └── 9cc0bffcd2e07b80c9a359867a671235a89235
+│   │   │   ├── 22
+│   │   │   │   ├── 566274009f6f9ade64791b803fe4ece13e5c1a
+│   │   │   │   └── 91a6ffcdc8c200875ad7fcf9c4520a42775fa1
+│   │   │   ├── 24
+│   │   │   │   ├── 0d12dc1d4a1101c1aba43de758100ba52b1507
+│   │   │   │   └── 57c8247e6d6039f8c62204eb5bb303be334325
+│   │   │   ├── 25
+│   │   │   │   ├── 1e30a08ed788e986ef66e8ccf249aced26548c
+│   │   │   │   └── 2665681431290cd159773c9f08ed2cd05a24bb
+│   │   │   ├── 28
+│   │   │   │   └── da6475b25fed0c2c4021ba78a280227ef2406a
+│   │   │   ├── 2a
+│   │   │   │   ├── ae71b3b26a6981a223dab369b36172c3de7392
+│   │   │   │   └── d1f27a3490523ea40800bb290c29816511d6d2
+│   │   │   ├── 2c
+│   │   │   │   └── 8f38b138bd9d9be4f9d58b6e028793b66a6417
+│   │   │   ├── 2d
+│   │   │   │   ├── 12703f81ac75de4472cb5a2060105dd627b087
+│   │   │   │   └── 45e5f5ac9b635f7503c820545318e06a53fc55
+│   │   │   ├── 2f
+│   │   │   │   └── 7123cb83af65dae756c916898f5fb112f659b9
+│   │   │   ├── 32
+│   │   │   │   ├── 6030f790a73656dffa5b2a5c1a06149c3b5c9b
+│   │   │   │   └── 9fa7d2dcb79cb87516113dfb6ffbb24aad59b0
+│   │   │   ├── 36
+│   │   │   │   ├── ce2c4901f4ca925ecd2ab4222b92dec9b111ca
+│   │   │   │   └── d354174c46d6fc86ef01cbbccfdd93ed1ad677
+│   │   │   ├── 37
+│   │   │   │   ├── 3de87c0283ea5420925ca66a09334d4f1c489a
+│   │   │   │   ├── 4dd764921696df547754ba4f5aece3ef3b77d2
+│   │   │   │   └── 887367915b6f06520dd3b66997cf992e6b7def
+│   │   │   ├── 38
+│   │   │   │   ├── 8380edf089c8ea0f51347e47da83358a1bf15f
+│   │   │   │   ├── 9b88625a2e14250d50cdb514114004750a2131
+│   │   │   │   └── d45be99ddf739876fd12f5b86de822b2bb566d
+│   │   │   ├── 39
+│   │   │   │   └── ec2162b57953bd20edfb9a963e89a3ce706c6b
+│   │   │   ├── 3b
+│   │   │   │   └── 6ea88ef7592d38c98f2580a57df0ee4483b0b7
+│   │   │   ├── 3c
+│   │   │   │   └── 1ee56992df33b49bc97ee5e4a2cbe0eb16e2bd
+│   │   │   ├── 3f
+│   │   │   │   └── 06d60e32a0cae5cecef59382e0815f55c27371
+│   │   │   ├── 41
+│   │   │   │   ├── 68357755182575060add71a2e06d17da7a9137
+│   │   │   │   └── ea55925eb4495fb511516d8070d46c4c80d690
+│   │   │   ├── 43
+│   │   │   │   ├── 5dd71905d8f74dcaa9f918d9bf83e092020ad8
+│   │   │   │   └── ba70596315aeb6d11712e7236348c01281d327
+│   │   │   ├── 44
+│   │   │   │   ├── ab439d387136ca235a55a52027d1526d43613b
+│   │   │   │   └── dd1dc2656a95e11ee3afc692f29c0a47d5516c
+│   │   │   ├── 45
+│   │   │   │   ├── 4eccf6e9d30f3f4d64fe51274608fca386619a
+│   │   │   │   └── d21f5e1f38a537d53d66248f73dbdae78d9531
+│   │   │   ├── 46
+│   │   │   │   └── 8c5f1aaf0d312909a7aa8392b81c181b44de8b
+│   │   │   ├── 47
+│   │   │   │   ├── 0a0f9f0e0fad551b817e72b9deffb0fdd7d29e
+│   │   │   │   ├── 1a0fe02a8fa1d47775ef6f782e836feb22e673
+│   │   │   │   ├── 7504ae5f0f63741beb8cd854a082a6931938c3
+│   │   │   │   └── 93dbb8e69885f80ba1b22a33aeb8ebfe1900fe
+│   │   │   ├── 48
+│   │   │   │   ├── 2468953d2e8e491f0c66fec2769a9ba44658db
+│   │   │   │   ├── 65f3baee4b5dae69305fb63cd2e8eb4bf497b0
+│   │   │   │   └── 9adb44fb752571c015058044e4a94f19cd7c1c
+│   │   │   ├── 49
+│   │   │   │   ├── 4a996b5b2c1b3370c27c4ba934dedacfe68efc
+│   │   │   │   └── d1ecee7d6823a15736c296c2e1b3b40056d5c7
+│   │   │   ├── 4d
+│   │   │   │   ├── 1c2fb2e227a306bb53acdeb342357d6ef76f88
+│   │   │   │   └── 686148e7dffaad9c6babb96a762272dcde456b
+│   │   │   ├── 4e
+│   │   │   │   ├── 5d80870f516fef021a6e5673cb854580424114
+│   │   │   │   ├── 607dcb491851404718c36c67aeb342526989d8
+│   │   │   │   └── b1228d5798b4fb4309af0f9ca14b2e86e69e1c
+│   │   │   ├── 4f
+│   │   │   │   ├── 2c774f2d13e882699e4351a4ebdcc61a688133
+│   │   │   │   └── f0fe80f112bdfbdc2acec8ebd881cd637cbcbc
+│   │   │   ├── 50
+│   │   │   │   └── 6e0320ac635abd768a070e8acfc2a2b98210f6
+│   │   │   ├── 54
+│   │   │   │   └── b65d6387e538fe3247ef01659c268efe42a2eb
+│   │   │   ├── 55
+│   │   │   │   └── 6eff94cb10dfd62ddeac3efcac34096ae1807b
+│   │   │   ├── 56
+│   │   │   │   └── 3eedfacee3e9033cffaf593cb11770917c0e1c
+│   │   │   ├── 57
+│   │   │   │   ├── 81c61f97aa624cd280d9eef4aa8e508ce40759
+│   │   │   │   └── 868ec0ae16f5173c9a11a0a2b6a72a183b82cc
+│   │   │   ├── 58
+│   │   │   │   ├── 92f0ba2d9ddbf26a7d25b1ac08a3d91ed9f591
+│   │   │   │   └── ca8e6041b619e0c402e2d6adbe9b96a59fd6a4
+│   │   │   ├── 59
+│   │   │   │   └── 8591a4479601be18f50a6a98e7a769047b0287
+│   │   │   ├── 5a
+│   │   │   │   └── e9c31f7a91a88d94e54a03ad0fb8aaf5871490
+│   │   │   ├── 5b
+│   │   │   │   ├── 8cb9c48700c2b977d00bc62b7e70b0c6709acf
+│   │   │   │   └── 9b033d81a438b836dba4c199e5efe89da25634
+│   │   │   ├── 5d
+│   │   │   │   └── c92cebab72ef0845adeecce16064b6ba5cc8a8
+│   │   │   ├── 5e
+│   │   │   │   └── 9f72e07e3e111d3a9b037bd843362ce0b556f0
+│   │   │   ├── 5f
+│   │   │   │   └── 6476ebe21aabdf797da7ce764a47ab1d642225
+│   │   │   ├── 60
+│   │   │   │   ├── 49eaddb8e048f910da144fd4dfb851f6840acf
+│   │   │   │   └── e361d095e6aa78268612c1de47b780e8cd21f0
+│   │   │   ├── 62
+│   │   │   │   ├── 7a2b079c269ff7b81a502469c776baab5761b6
+│   │   │   │   ├── 849ad220018637b2829ef49e028d889ae01b6f
+│   │   │   │   └── d1f0d18e65d59067656bee5b0c62b49dfa5344
+│   │   │   ├── 63
+│   │   │   │   └── 30a07b950ac836648f55f3ec1a9cd38a05949c
+│   │   │   ├── 64
+│   │   │   │   └── a614affa3b7e2a9f6d691e7a7ede3a1815849b
+│   │   │   ├── 65
+│   │   │   │   └── 03e82529b0b6d619ccb3334fd608868ac608e8
+│   │   │   ├── 67
+│   │   │   │   └── 57faac7a81d9bfd4dbec2d44f710683f569e24
+│   │   │   ├── 68
+│   │   │   │   └── 06be0b6858daaed38c58d934ba5ce2e4634e93
+│   │   │   ├── 6a
+│   │   │   │   └── b3a8f0486586859e5b9be31be0c453211eb682
+│   │   │   ├── 6e
+│   │   │   │   └── 54a51a21839eb6379941e7e5ac2b3436f9bdb6
+│   │   │   ├── 70
+│   │   │   │   └── 91131c193257e0c6fa8acd50d56a28b229a7f9
+│   │   │   ├── 73
+│   │   │   │   ├── 425e46ab2cdbf166aaba5e47c92714cc6b9494
+│   │   │   │   └── 5f6dde13667f85aea25f4e38875f1ce90bc9e4
+│   │   │   ├── 74
+│   │   │   │   ├── 0d7910fd30c6411d35d33df630fba26e40c818
+│   │   │   │   └── 88e94951319ac7b089601ab88e2fe320e468b2
+│   │   │   ├── 75
+│   │   │   │   └── 7c7fb4178ad16d11940d883a22d716f314adf3
+│   │   │   ├── 76
+│   │   │   │   └── 73b6ae3790abf2a9605baee5ce8223fea169fb
+│   │   │   ├── 77
+│   │   │   │   ├── 06ad573bd4f14967c4db403ded0dd601c9edfe
+│   │   │   │   ├── 211666ff4998eac45003e6dd4157a7fa0dcc36
+│   │   │   │   ├── 3cf8d2b3f28c14a23e7d6920a022eb2a125506
+│   │   │   │   └── a5871d18ff9f025b9735e1c13cf9ece8f62e38
+│   │   │   ├── 78
+│   │   │   │   ├── a7c6a89365404bc977487251d7eb7ee87940c8
+│   │   │   │   └── e795ddd81fa82ecc5ca040a233c416bd114fa2
+│   │   │   ├── 79
+│   │   │   │   └── 10585651779e5b00e61ecb7e3266195157aaad
+│   │   │   ├── 7b
+│   │   │   │   ├── 0607c3999f2613f034870bb95fb4e686259506
+│   │   │   │   └── 51f11dd4d97725c8809e08fbdd65cdf80f35e2
+│   │   │   ├── 7d
+│   │   │   │   └── cff9beca28f02fcfe98901b76b2d82401fcc89
+│   │   │   ├── 7e
+│   │   │   │   ├── 3c032f81c3c43239f1256b0f7c9912b906bedf
+│   │   │   │   ├── 3c59cba1270c0926f48f7c9dfc87627d35c3ad
+│   │   │   │   └── 764ebf3ac0faff2f9df62111a6e546939a7d81
+│   │   │   ├── 7f
+│   │   │   │   └── f50ba290479f059ea4beb4486589d10544b139
+│   │   │   ├── 82
+│   │   │   │   ├── 5bcdc36aeb22aefe7ccc49f47c0ffe240e8715
+│   │   │   │   └── f3216c69690a8025daa91534e0e2926c55b97b
+│   │   │   ├── 83
+│   │   │   │   └── 2758ef822c6ede0a9fe3c78440388e82951195
+│   │   │   ├── 84
+│   │   │   │   └── 4027b7f6b7637ab683a30e9f37a9dc27e58d94
+│   │   │   ├── 85
+│   │   │   │   ├── 0b0daeb2d56b6f5ab9c4599b030fdfb185bc9b
+│   │   │   │   └── 326bcaacae1e2029f0dd075403cac2ed401763
+│   │   │   ├── 86
+│   │   │   │   └── b7145b4c0d6f369d08de7757f2a57b4c783780
+│   │   │   ├── 87
+│   │   │   │   └── 5c2348f17683288fde2fb2970ec4ac5b12177a
+│   │   │   ├── 88
+│   │   │   │   └── c8776a72309c6167e2f5d5f19e82a82ae6803e
+│   │   │   ├── 8a
+│   │   │   │   └── 20a030f418776d89957f886fdae0a4795b1984
+│   │   │   ├── 8b
+│   │   │   │   └── a1473534c7cdc23e36054bbcd93f678d9641b9
+│   │   │   ├── 8c
+│   │   │   │   ├── a6e655522a304086e51f846e7abc2f5a790460
+│   │   │   │   └── d98282798467ee655f61435386a5e2199a5f83
+│   │   │   ├── 8d
+│   │   │   │   ├── 5a4b4cd5ec2527e143813b521081e9a1322f77
+│   │   │   │   ├── ae3715ff18f8ec11581e55c6ee7492e546ac59
+│   │   │   │   └── efa00b8b584b82b9ba41615a61fa3c4d176ca4
+│   │   │   ├── 8f
+│   │   │   │   ├── 5c5afd6a36a382bfdcc4c876f8724ca0097d88
+│   │   │   │   └── 784bba6144d59e72486dc07af769000d50e526
+│   │   │   ├── 91
+│   │   │   │   ├── 146146ce993e6bcd32b0cf42e503e216b881e9
+│   │   │   │   └── 347075390b95e1ccca2958cb69db266938691e
+│   │   │   ├── 93
+│   │   │   │   └── 1986da88755cc7649bdf7ad9b3f2900b398c8e
+│   │   │   ├── 94
+│   │   │   │   └── 14dc68b56975b2137bced445720dc2c3bab5ad
+│   │   │   ├── 96
+│   │   │   │   ├── 09a0a7e82b5730723aba874071d2c30c88e5b7
+│   │   │   │   └── f070d03b22c7a55c53556dd296995d0cf034bd
+│   │   │   ├── 97
+│   │   │   │   ├── 8fc8b5a0eb2066fda8c4bba9792753005041b7
+│   │   │   │   ├── b381d26d505491b9547ed771868701d79608fd
+│   │   │   │   └── dcf0735c3a7d37208b81362daab3b3cb27c1cc
+│   │   │   ├── 99
+│   │   │   │   └── 37d3367bfa22ceec6ad8d94cf0c1532e2a63b7
+│   │   │   ├── 9b
+│   │   │   │   └── b54859e173452e46b1b596d707cc0803625cfb
+│   │   │   ├── 9c
+│   │   │   │   ├── 8e1d8bb91056e52c5cd04a2893ee4d50a5573c
+│   │   │   │   └── bee615f2374b367db0a45bdd42bb5c3df9ffbc
+│   │   │   ├── 9e
+│   │   │   │   └── 296cfa98ea9b87189699448d9e2461e33a7a0b
+│   │   │   ├── 9f
+│   │   │   │   └── 1437ae627a09c79222a588247d13f7959693fe
+│   │   │   ├── a0
+│   │   │   │   └── aa040331b17d17e67e239c1d61ec32c8be7e01
+│   │   │   ├── a3
+│   │   │   │   └── a0075385b60b7fb9439d1e04dce73d28834c63
+│   │   │   ├── a5
+│   │   │   │   └── 957235b9f9fa1588d83eb6bf33c6ba295a6182
+│   │   │   ├── a6
+│   │   │   │   └── 2ceee1d575cfc893fe64a081040643e29d9f55
+│   │   │   ├── a8
+│   │   │   │   ├── 5cd791f94a0e964921e62123f77df332261b75
+│   │   │   │   └── fa81cf62336f423bee85ce315ca133398418fb
+│   │   │   ├── a9
+│   │   │   │   ├── 0d4a844b5d719f3f5aebb9d9907634446f4975
+│   │   │   │   └── 70c5244e92455b7b504794257e35d67dd7a4a5
+│   │   │   ├── aa
+│   │   │   │   ├── 56807c250bca782b68f2b6d5a8a6aeac4b0506
+│   │   │   │   ├── ce824448b335235130e4ccffe5bee7b5877937
+│   │   │   │   └── f7734257e2ca2a9d46ca77ec7eecbcc693057e
+│   │   │   ├── ad
+│   │   │   │   ├── 2098144bd448c5442b4c51e36715285bb46c28
+│   │   │   │   └── a08506c0a08800abb1b0b91df11a6e7798aae0
+│   │   │   ├── af
+│   │   │   │   └── a97a6699d82a94c2195c41212f76b53c2af0ab
+│   │   │   ├── b1
+│   │   │   │   └── 7483854263b742094752ab7874045bc77112c7
+│   │   │   ├── b6
+│   │   │   │   └── 15a69f99f42a7593cb1f1054401e8e8d5b7f87
+│   │   │   ├── b7
+│   │   │   │   └── 629eb9fcf65ea2eb6c78ae5708f145a9183ebb
+│   │   │   ├── b8
+│   │   │   │   ├── 4e4c959f43252d0ccec0d05dcc21e797ebfed0
+│   │   │   │   └── e1bba6d9a9325567e6dae2a5604bd06309efa4
+│   │   │   ├── b9
+│   │   │   │   └── 8f63852ab5ac464033dd6f2f7aeb9031b42cc4
+│   │   │   ├── bb
+│   │   │   │   └── cd2bbaab4be1bc47b85b7fe34ab0b9a08242ff
+│   │   │   ├── bc
+│   │   │   │   └── 49ead34c1481d7c1d385d7293a50845c549a23
+│   │   │   ├── bd
+│   │   │   │   └── 287f3b8673816ec6146466a9be86608b7be8e8
+│   │   │   ├── bf
+│   │   │   │   └── 8b9197c9d6e8d54b73be98717c08fb021dce13
+│   │   │   ├── c0
+│   │   │   │   └── 88959ee4647e94086dec775a69d1604c4d2c8c
+│   │   │   ├── c1
+│   │   │   │   └── e9029f8550176aeed408b8b25a8e0cf2ade9aa
+│   │   │   ├── c2
+│   │   │   │   └── 7ce43d790e5c510573d76ec570d17f1ccd3230
+│   │   │   ├── c3
+│   │   │   │   ├── 0eac84c4b2b6c33fd25ef9d09847304b68d1e4
+│   │   │   │   ├── 2bf193d0fcbbd699f6c60410600ada24e9f233
+│   │   │   │   ├── 73c07e0230748adbd2cbe3718cffa356fccb31
+│   │   │   │   └── d9f2407417795889250717d7b519eadd8373e6
+│   │   │   ├── c6
+│   │   │   │   ├── 44cd7f0a2b4cadd827a7432c4eed7ceb0f2b95
+│   │   │   │   └── c0608fee1537486cb5a8122c71cb6ce481c9b7
+│   │   │   ├── c8
+│   │   │   │   └── 52c289403d049387b6bb681d1ea6404b9e5ade
+│   │   │   ├── ca
+│   │   │   │   └── e17c1429a0e39271dbf92fba05d1b0271a6da1
+│   │   │   ├── cb
+│   │   │   │   ├── 07d065b6c6d28e1360fee526ef4e51804fb7b7
+│   │   │   │   ├── 6390e37a67a75bde36cc482a89f3b5c49ddc1c
+│   │   │   │   └── cb8a2a7731c78af99e69b156e8ef3ae8e618e7
+│   │   │   ├── cc
+│   │   │   │   └── aa7aad28da73a2da44ec64fd9599580ac1ea80
+│   │   │   ├── cd
+│   │   │   │   └── 4c3d314e206aa30046897230a91f9137218db2
+│   │   │   ├── ce
+│   │   │   │   ├── 0268cd95d39987e1740936c333177866fda355
+│   │   │   │   └── 7cc860136a8620718738877474e45bb01bce93
+│   │   │   ├── d0
+│   │   │   │   └── 4daa652123f63f6acc5af51bf659ad1227a380
+│   │   │   ├── d2
+│   │   │   │   ├── 7f2a4c66920e6f2393281adf60a6a9d9935fba
+│   │   │   │   └── 9a7dd3fec21c909ae60cd35f7e1db6534a0d91
+│   │   │   ├── d3
+│   │   │   │   ├── 717368c206460a75b07e5b123bbe5e19840be5
+│   │   │   │   ├── 7f71ff2a36a565fe3fc65d83a5ae06875aa635
+│   │   │   │   └── b45905ef0bdc233e1553b769f1374d99d0bb23
+│   │   │   ├── d4
+│   │   │   │   ├── 60f92c7487c3606439bebac1af0dfbab7a73f3
+│   │   │   │   └── 862b18374aa5df792de73eb56a108b78b10948
+│   │   │   ├── d5
+│   │   │   │   └── 24ceb3cb1062865df3bdaabc44b7573dd21299
+│   │   │   ├── d7
+│   │   │   │   ├── 10dae9bdaeb5c46661116cd632eb6802272b77
+│   │   │   │   ├── 7567248637ac83cf81507f416b71575cf85d91
+│   │   │   │   └── a61dcc16de7e5b7792d59df65d3be1cca44c4b
+│   │   │   ├── d9
+│   │   │   │   ├── 37ddfff29d1fb53adac56b0755065995f2323f
+│   │   │   │   └── 757307801679dc2101cde103e1f91383d49c43
+│   │   │   ├── da
+│   │   │   │   └── d1fffbbe7a7a4338ec830e48419d0ad6005014
+│   │   │   ├── dc
+│   │   │   │   └── 5c578a1a0d9803a41f0c24a1733fbfb2144e28
+│   │   │   ├── dd
+│   │   │   │   └── 9163c7d76b6c44367e916220ad9cb8f5676983
+│   │   │   ├── de
+│   │   │   │   ├── cbb0e14caf53ab9b8446cf3c2fceafb44487af
+│   │   │   │   └── deb76999441924c4371e52030afb3810a59ed6
+│   │   │   ├── e1
+│   │   │   │   ├── 443bbcc2a0bacb11eeca8d877fb28fb61e4236
+│   │   │   │   └── 4d139875991ee4180b86444883ef3a16dbab17
+│   │   │   ├── e3
+│   │   │   │   └── f40043744c2dcea1f42981bc26ed3234bd33c6
+│   │   │   ├── e4
+│   │   │   │   └── 30062fc1d8c6b75b69e756e74c8b7bcb783053
+│   │   │   ├── e5
+│   │   │   │   └── 7b660e57f7a474bb1a035ee5445963c2b1f5ee
+│   │   │   ├── e6
+│   │   │   │   ├── 51176814917b286a1762b324a5ee4cf4d9de3a
+│   │   │   │   ├── 66715c09f999c80b9154b7ffcd364bacf64b3f
+│   │   │   │   └── 9de29bb2d1d6434b8b29ae775ad8c2e48c5391
+│   │   │   ├── e7
+│   │   │   │   └── 52cd705723915f4f8e9a9e760d474ae43c3703
+│   │   │   ├── e9
+│   │   │   │   ├── 118f34d81c773d2d98c315ea427dade46db7c5
+│   │   │   │   └── 1cec4a4d165501f0f51b79b36fa375727e8777
+│   │   │   ├── eb
+│   │   │   │   ├── 0809b801420ad2323fb028ea5e6c481563b237
+│   │   │   │   ├── 82f57c750582a7944b35c705f3b54a6bc5c3e6
+│   │   │   │   ├── a158857ca579f60a2d9c6bf2a46659a1227b52
+│   │   │   │   └── ca46ae349161ce469de706f85f55f0469429aa
+│   │   │   ├── ec
+│   │   │   │   └── 13944b0de3d04a7a3a245059ced77e0adc4cbd
+│   │   │   ├── ed
+│   │   │   │   ├── 13a7df92ef9cf859135edf576011ab78cf2645
+│   │   │   │   └── 8658dcaf203fd7f9d7e398ec460f52d190b3eb
+│   │   │   ├── ee
+│   │   │   │   ├── 5c88bd803dad55c790eda306c2b657b2aee39a
+│   │   │   │   └── 814517c8984eb5f7307fae546dc1b67ba01210
+│   │   │   ├── f0
+│   │   │   │   └── 1ddc0cf2aebba890ec6735700673ee78f9d38e
+│   │   │   ├── f1
+│   │   │   │   └── 3bdd6973aa072a30817e6451ef48b6d2ca7151
+│   │   │   ├── f2
+│   │   │   │   └── ec70e16873f8a68caf7e838229413b488366c7
+│   │   │   ├── f3
+│   │   │   │   ├── 8adfb8758fcd1f8dd7764f96691912b344fa26
+│   │   │   │   └── 8c0e3af9bb7392f6852575a6753fb2b0c45c84
+│   │   │   ├── f6
+│   │   │   │   ├── 06c87bd9aadbda69a7bcbdb6dac046243648d5
+│   │   │   │   └── 3d1428dfec9404e21b9467872a153d874404bb
+│   │   │   ├── f7
+│   │   │   │   └── 09af9162f37dc1b477025417e5a3c4c380b60f
+│   │   │   ├── f8
+│   │   │   │   ├── 43984c8058270c41ceff40ab022f0687b1b1ee
+│   │   │   │   ├── 767aa9d4c50d4cec84741b68f8eef002fc3dba
+│   │   │   │   └── d2af7b4da80f79b30cb75647f6774cde22583c
+│   │   │   ├── fb
+│   │   │   │   ├── 0026b8beb152ea65fec19d810217a7fb9a9910
+│   │   │   │   ├── a352b4182efc13096c0aab5dbf4bad9ead311b
+│   │   │   │   └── daf1241e5538537ee83e48b70bf1f618050286
+│   │   │   ├── fc
+│   │   │   │   └── b14ab508ecb5287861b6647876e6951f170b5c
+│   │   │   ├── fd
+│   │   │   │   ├── 44612e7297b719949bb260323c8e02da4c6cd9
+│   │   │   │   └── ca700b7817a156e07f428dd1f381de887d6ab8
+│   │   │   ├── fe
+│   │   │   │   ├── 0f522b1dc64d7f9aa3c7b41617406b82a27431
+│   │   │   │   └── 15be88146937a541a9343e62d59517a6bc07d1
+│   │   │   ├── ff
+│   │   │   │   └── 6e185c6e9e3aed68e070321d689624c7c5a230
+│   │   │   ├── info
+│   │   │   └── pack
+│   │   ├── ORIG_HEAD
+│   │   └── refs
+│   │       ├── heads
+│   │       │   └── main
+│   │       ├── remotes
+│   │       │   └── origin
+│   │       │       └── main
+│   │       └── tags
+│   ├── instant-remote-storage.sh
+│   ├── lib
+│   │   └── irs_recovery.sh
+│   ├── LICENSE
+│   ├── mime_map.sh
+│   ├── README-(of-the-makefile).md
+│   ├── scripts
+│   │   └── irs-setup
+│   └── systemd
+│       ├── system
+│       │   └── instant-remote-storage@.service
+│       └── user
+│           └── instant-remote-storage@.service
+├── test
+├── tmp
+│   ├── a.log
+│   ├── assign_extension-v0.sh
+│   ├── assign_extension-v2.sh
+│   └── log_28-7-21:39
+├── tools
+│   └── build-deb.sh
+└── x
+    ├── 085513478-ce230fd7-f147-4d3c-a7dc-34edc43b6d2e-copia.jpg
+    ├── 085513478-ce230fd7-f147-4d3c-a7dc-34edc43b6d2e.jpg
+    ├── 123967923-203867171109005-51919324441943136-n-copia.jpg
+    ├── 123967923-203867171109005-51919324441943136-n.jpg
+    ├── 141785583-10158909670337486-7575346752900889634-o-copia-skefug.jpg
+    ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    ├── 2bcbb810d8a0dd7e06bad4b8859e4501.jpg
+    ├── 30333_cc76e92f-a127-4491-9c3f-e5f4e1786e23-794039.webp
+    ├── 34973df5ac96879902dbf9b93520d9a9-copia.jpg
+    ├── 34973df5ac96879902dbf9b93520d9a9.jpg
+    ├── (3) Facebook.mp
+    ├── 80681243-10157870742467486-653676954251165696-o-
+    ├── 80681243-10157870742467486-653676954251165696-o.jpg
+    ├── 96436971-871584196671307-7652356356703256576-o-copia.jpg
+    ├── 96436971-871584196671307-7652356356703256576-o.jpg
+    ├── babu.txt
+    ├── backup-due-prov j,h 757b àà
+    ├── backup-prove.tar.gaz
+    ├── buban.txt
+    ├── caa45d8a2fe3171fc12302cea7d55078-copia.jpg
+    ├── caa45d8a2fe3171fc12302cea7d55078.jpg
+    ├── cartella_a
+    │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   └── 2bcbb810d8a0dd7e06bad4b8859e4501.jpg
+    ├── ciUCci &£
+    ├── ciUCci &£ (copia)
+    ├── ciUCci &£ (copia 3)
+    ├── ciUCci &£ (copia 4)
+    ├── ciUCci &£ (copia 5)
+    ├── ciUCci &£ (un'altra copia)
+    ├── cocosx-copia.txt.l.hdtsgf.jhgdsc.9678 ò 76
+    ├── cocosx-jpg-copia.txt
+    ├── cocosx-jpg.txt
+    ├── cocosx.txt
+    ├── conta-righe-primo-sottociclo-1.sh
+    ├── debugging-dati_di_prova
+    │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   ├── 141785583-10158909670337486-7575346752900889634-o-skefug.jpg
+    │   ├── asterix-il-gallico-film-completo-1967.mp4
+    │   ├── caa45d8a2fe3171fc12302cea7d55078.jpg
+    │   ├── debugging-dati_di_prova.tar.gz
+    │   ├── prove-a-breve
+    │   │   ├── 01 - Tita - Miss Universo (copia 3).wav
+    │   │   ├── 01 - Tita - Miss Universo (copia).wav
+    │   │   ├── 01 - Tita - Miss Universo (un'altra copia).wav
+    │   │   ├── 01 - Tita - Miss Universo.wav
+    │   │   ├── 141785583_10158909670337486_7575346752900889634_o . (copia 3).      skefug 
+    │   │   ├── 141785583_10158909670337486_7575346752900889634_o . (copia).      skefug 
+    │   │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │   ├── 141785583-10158909670337486-7575346752900889634-o-skefug (copia 3).jpg
+    │   │   ├── 141785583-10158909670337486-7575346752900889634-o-skefug (copia).jpg
+    │   │   ├── 141785583-10158909670337486-7575346752900889634-o-skefug.jpg
+    │   │   ├── 141785583-10158909670337486-7575346752900889634-o-skefug (un'altra copia).jpg
+    │   │   ├── 141785583_10158909670337486_7575346752900889634_o . (un'altra copia).      skefug 
+    │   │   ├── 1510675158772-controlli-duomo (copia).jpeg
+    │   │   ├── 1510675158772-controlli-duomo.jpeg
+    │   │   ├── 2bcbb810d8a0dd7e06bad4b8859e4501 (copia 3).jpg
+    │   │   ├── 2bcbb810d8a0dd7e06bad4b8859e4501 (copia).jpg
+    │   │   ├── 2bcbb810d8a0dd7e06bad4b8859e4501.jpg
+    │   │   ├── 2bcbb810d8a0dd7e06bad4b8859e4501 (un'altra copia).jpg
+    │   │   ├── cartella_a
+    │   │   │   ├── 01 - Tita - Miss Universo.wav
+    │   │   │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │   │   ├── 2bcbb810d8a0dd7e06bad4b8859e4501.jpg
+    │   │   │   ├── brambillax
+    │   │   │   ├── ottonies.wav
+    │   │   │   └── ülö
+    │   │   │       ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │   │       ├── 2bcbb810d8a0dd7e06bad4b8859e4501.jpg
+    │   │   │       ├── bauio
+    │   │   │       ├── .caio
+    │   │   │       │   ├── .caio-nasc
+    │   │   │       │   ├── gartellax
+    │   │   │       │   │   ├── .caio-nasc
+    │   │   │       │   │   ├── cix
+    │   │   │       │   │   └── tubo
+    │   │   │       │   └── tubo
+    │   │   │       ├──  GJHGLKJHlkjnkjher qwef-lnm3red ſer
+    │   │   │       └── .lavarro
+    │   │   ├── cartella_a (copia)
+    │   │   │   ├── 01 - Tita - Miss Universo.wav
+    │   │   │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │   │   ├── 2bcbb810d8a0dd7e06bad4b8859e4501.jpg
+    │   │   │   ├── brambillax
+    │   │   │   └── ottonies.wav
+    │   │   ├── cartella_a (un'altra copia)
+    │   │   │   ├── 01 - Tita - Miss Universo.wav
+    │   │   │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │   │   ├── 2bcbb810d8a0dd7e06bad4b8859e4501.jpg
+    │   │   │   ├── brambillax
+    │   │   │   ├── ottonies.wav
+    │   │   │   └── ülö
+    │   │   │       ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │   │       ├── 2bcbb810d8a0dd7e06bad4b8859e4501.jpg
+    │   │   │       └──  GJHGLKJHlkjnkjher qwef-lnm3red ſer
+    │   │   ├── Documento senza nome
+    │   │   ├── manifestox
+    │   │   ├── .nascosto
+    │   │   └── .nascosto-est.txt
+    │   ├── prove-b-media
+    │   │   ├── backup-due-prov j,h 757b àà
+    │   │   ├── backup-prove.tar.gaz
+    │   │   ├── lmde-6-cinnamokjb 8787 n-64bit.iso.to
+    │   │   └── y
+    │   │       ├── 141785583_10158909670337486_7575346752900889634_o . (copia).      skefug 
+    │   │       ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │       ├── 80681243-10157870742467486-653676954251165696-o-
+    │   │       ├── 80681243-10157870742467486-653676954251165696-o- (copia)
+    │   │       ├── caa45d8a2fe3171fc12302cea7d55078.jpg
+    │   │       ├── gdxsd
+    │   │       │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │       │   ├── Documento_personale_istruzioni_e_comprensione_script_backup-smart.md
+    │   │       │   ├── f6d185e00002ac3fccbeecc0e6040c6b-copia-copia.jpg
+    │   │       │   ├── ghfg
+    │   │       │   │   ├── 085513478-ce230fd7-f147-4d3c-a7dc-34edc43b6d2e-copia.jpg
+    │   │       │   │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │       │   │   ├── 30333_cc76e92f-a127-4491-9c3f-e5f4e1786e23-794039.webp
+    │   │       │   │   ├── 80681243-10157870742467486-653676954251165696-o-
+    │   │       │   │   ├── backup-prove.tar (copia).gaz
+    │   │       │   │   ├── backup-prove.tar.gaz
+    │   │       │   │   ├── cocosx-copia.txt.l.hdtsgf.jhgdsc.9678 ò 76
+    │   │       │   │   └── edwige-fenech-1984-c-98es-dt-kuds-s7s877ds-ssd-srfkj.jpg
+    │   │       │   ├── mdt2us.pdf
+    │   │       │   └── parameter-primo-sottociclo-3.sh
+    │   │       ├── ghfg
+    │   │       │   ├── 141785583_10158909670337486_7575346752900889634_o . (copia).      skefug 
+    │   │       │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │       │   ├── caa45d8a2fe3171fc12302cea7d55078-copia.jpg
+    │   │       │   ├── caa45d8a2fe3171fc12302cea7d55078 (copia).jpg
+    │   │       │   └── caa45d8a2fe3171fc12302cea7d55078.jpg
+    │   │       ├── varibile-4 (copia).sh
+    │   │       └── varibile-4.sh
+    │   ├── prove-c-grande
+    │   │   ├── backup-due-prov j,h 757b àà
+    │   │   ├── backup-prove.tar.gaz
+    │   │   ├── lmde-6-cinnamokjb 8787 n-64bit.iso.to
+    │   │   ├── sherlockholmesandthesecretweapon1943512kb-mp4-1.mp4
+    │   │   └── y
+    │   │       ├── 141785583_10158909670337486_7575346752900889634_o . (copia).      skefug 
+    │   │       ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │       ├── 80681243-10157870742467486-653676954251165696-o-
+    │   │       ├── 80681243-10157870742467486-653676954251165696-o- (copia)
+    │   │       ├── caa45d8a2fe3171fc12302cea7d55078.jpg
+    │   │       ├── gdxsd
+    │   │       │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │       │   ├── Documento_personale_istruzioni_e_comprensione_script_backup-smart.md
+    │   │       │   ├── f6d185e00002ac3fccbeecc0e6040c6b-copia-copia.jpg
+    │   │       │   ├── ghfg
+    │   │       │   │   ├── 085513478-ce230fd7-f147-4d3c-a7dc-34edc43b6d2e-copia.jpg
+    │   │       │   │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │       │   │   ├── 30333_cc76e92f-a127-4491-9c3f-e5f4e1786e23-794039.webp
+    │   │       │   │   ├── 80681243-10157870742467486-653676954251165696-o-
+    │   │       │   │   ├── backup-prove.tar (copia).gaz
+    │   │       │   │   ├── backup-prove.tar.gaz
+    │   │       │   │   ├── cocosx-copia.txt.l.hdtsgf.jhgdsc.9678 ò 76
+    │   │       │   │   ├── edwige-fenech-1984-c-98es-dt-kuds-s7s877ds-ssd-srfkj.jpg
+    │   │       │   │   └── sherlockholmesandthesecretweapon1943512kb-mp4-1.mp4
+    │   │       │   ├── mdt2us.pdf
+    │   │       │   └── parameter-primo-sottociclo-3.sh
+    │   │       ├── ghfg
+    │   │       │   ├── 141785583_10158909670337486_7575346752900889634_o . (copia).      skefug 
+    │   │       │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │       │   ├── caa45d8a2fe3171fc12302cea7d55078-copia.jpg
+    │   │       │   ├── caa45d8a2fe3171fc12302cea7d55078 (copia).jpg
+    │   │       │   └── caa45d8a2fe3171fc12302cea7d55078.jpg
+    │   │       ├── varibile-4 (copia).sh
+    │   │       └── varibile-4.sh
+    │   ├── set_sufficiente
+    │   │   ├── 01 - Tita - Miss Universo.wav
+    │   │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │   ├── 1510675158772-controlli-duomo.jpeg
+    │   │   ├── cartella_a
+    │   │   │   ├── 01 - Tita - Miss Universo.wav
+    │   │   │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │   │   ├── 2bcbb810d8a0dd7e06bad4b8859e4501.jpg
+    │   │   │   ├── brambillax
+    │   │   │   ├── ottonies.wav
+    │   │   │   └── ülö
+    │   │   │       ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   │   │       ├── 2bcbb810d8a0dd7e06bad4b8859e4501.jpg
+    │   │   │       ├── bauio
+    │   │   │       ├── .caio
+    │   │   │       │   ├── .caio-nasc
+    │   │   │       │   ├── gartellax
+    │   │   │       │   │   ├── .caio-nasc
+    │   │   │       │   │   ├── cix
+    │   │   │       │   │   └── tubo
+    │   │   │       │   └── tubo
+    │   │   │       ├──  GJHGLKJHlkjnkjher qwef-lnm3red ſer
+    │   │   │       └── .lavarro
+    │   │   ├── manifestox
+    │   │   └── .nascosto
+    │   └── sherlockholmesandthesecretweapon1943512kb-mp4-1.mp4
+    ├── debugging-dati-di-prova.tar.gz
+    ├── devops-canvas-studio-weeklyplan.docx
+    ├── die-schule-der-magischen-tiere-2021-german-1080p-bluray-x264-pl3x.mkv
+    ├── edwige-fenech-1984-c-98es-dt-kuds-s7s877ds-ssd-srfkj.jpg
+    ├── edwige-fenech2-mgzoom.jpg
+    ├── errore-demo.sh
+    ├── f6d185e00002ac3fccbeecc0e6040c6b-copia-copia-copia.jpg
+    ├── f6d185e00002ac3fccbeecc0e6040c6b-copia-copia.jpg
+    ├── f6d185e00002ac3fccbeecc0e6040c6b-copia.jpg
+    ├── f6d185e00002ac3fccbeecc0e6040c6b.jpg
+    ├── gettyimages-1178915289-1024x1024-copia-copia-copia-copia.jpg
+    ├── gettyimages-1178915289-1024x1024-copia-copia-copia.jpg
+    ├── gettyimages-1178915289-1024x1024-copia-copia.jpg
+    ├── gettyimages-1178915289-1024x1024-copia.jpg
+    ├── gettyimages-1178915289-1024x1024.jpg
+    ├── ghfg
+    │   ├── 085513478-ce230fd7-f147-4d3c-a7dc-34edc43b6d2e-copia.jpg
+    │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+    │   ├── 30333_cc76e92f-a127-4491-9c3f-e5f4e1786e23-794039.webp
+    │   ├── backup-prove.tar.gaz
+    │   ├── cocosx-copia.txt.l.hdtsgf.jhgdsc.9678 ò 76
+    │   └── edwige-fenech-1984-c-98es-dt-kuds-s7s877ds-ssd-srfkj.jpg
+    ├── l-1.txt
+    ├── l-2lkm-lk-kkk-kjj-jh-g-65-à.txt
+    ├── LinuxCalibr
+    ├── lmde-6-cinnamokjb 8787 n-64bit.iso.to
+    ├── maserati-a6g-cs53-berlinetta-pininfarina-54-copia.jpg
+    ├── maserati-a6g-cs53-berlinetta-pininfarina-54.jpg
+    ├── mdt2us (copia).pdf
+    ├── mdt2us.pdf
+    ├── parameter-primo-sottociclo-3-copia.sh
+    ├── parameter-primo-sottociclo-3.sh
+    ├── ripeti-3-copia-copia-copia.sh
+    ├── ripeti-3-copia-copia.sh
+    ├── ripeti-3-copia.sh
+    ├── ripeti-3.sh
+    ├── saluto-2.sh
+    ├── sherlockholmesandthesecretweapon1943512kb-mp4-1.mp4
+    ├── stirling-moss-copia.png
+    ├── stirling-moss.png
+    ├── test
+    │   ├── test_2.sh
+    │   ├── test_3.sh
+    │   └── test.sh
+    ├── tmp_raccolta_file_sensatini
+    │   ├── 1937-touring-alfa-romeo-8c-2900-b-lungo-berlinetta-keith-grey-04-profile.jpg
+    │   ├── 311633326-10160505776097249-6653493157891771031-n.jpg
+    │   ├── 904242a-hb-a-006.jpg
+    │   ├── alessandro-tofanelli-il-ritorno-2006.jpg
+    │   ├── alfa-romeo-6c-2500-ss-pininfarina-cabriolet-1949-4.jpg
+    │   ├── alfa-romeo-6c-2500-ss-pininfarina-cabriolet-1949-5.jpg
+    │   ├── alfa-romeo-6c-2500-ss-pininfarina-cabriolet-1949-6.jpg
+    │   ├── alfa-romeo-8c-2900b-touring-berlinetta.webp
+    │   ├── alle-6-00-sampierdarena-genova.jpg
+    │   ├── brindisi-di-montagna-potenza-castello-fittipaldi-antinori.jpg
+    │   ├── frutti-di-mare-bari.jpg
+    │   ├── ge-11-22.jpg
+    │   ├── genova-3.jpg
+    │   ├── instant-remote-storage-3-0-0-13-all.deb
+    │   ├── niccolo-dellarca-compianto-sul-cristo-morto-chiesa-di-s-maria-della-vita-bologna.jpg
+    │   ├── padova.jpg
+    │   ├── palazzo-adriani-lucca-2.jpg
+    │   ├── palazzo-adriani-lucca-3.jpg
+    │   ├── palazzo-adriani-lucca.jpg
+    │   ├── palazzo-brandolin-venezia.jpg
+    │   ├── palazzo-nicolosio-lomellino-genova.jpg
+    │   ├── polignano-portrait.webp
+    │   ├── römisches-bodenmosaik-aus-dem-2-jahrhundert-n-chr-mit-dem-kopf-des-dionysos-in-der-mitte.jpg
+    │   ├── ruta-di-camogli.jpg
+    │   ├── san-michele-di-pagana.jpg
+    │   ├── terrazza-caffarelli-rm.jpg
+    │   ├── torino-via-pietro-micca.jpg
+    │   └── via-xx-settembre-genova.jpg
+    ├── tmprsync-2.sh
+    ├── tumblr-oolzaffw0k1v9s69ko1-1280.jpg
+    ├── validate-expr-10.sh
+    ├── varibile-4.sh
+    └── y
+        ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+        ├── 80681243-10157870742467486-653676954251165696-o-
+        ├── caa45d8a2fe3171fc12302cea7d55078.jpg
+        ├── gdxsd
+        │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+        │   ├── Documento_personale_istruzioni_e_comprensione_script_backup-smart.md
+        │   ├── f6d185e00002ac3fccbeecc0e6040c6b-copia-copia.jpg
+        │   ├── ghfg
+        │   │   ├── 085513478-ce230fd7-f147-4d3c-a7dc-34edc43b6d2e-copia.jpg
+        │   │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+        │   │   ├── 30333_cc76e92f-a127-4491-9c3f-e5f4e1786e23-794039.webp
+        │   │   ├── 80681243-10157870742467486-653676954251165696-o-
+        │   │   ├── backup-prove.tar.gaz
+        │   │   ├── cocosx-copia.txt.l.hdtsgf.jhgdsc.9678 ò 76
+        │   │   └── edwige-fenech-1984-c-98es-dt-kuds-s7s877ds-ssd-srfkj.jpg
+        │   ├── mdt2us.pdf
+        │   └── parameter-primo-sottociclo-3.sh
+        ├── ghfg
+        │   ├── 141785583_10158909670337486_7575346752900889634_o ..      skefug 
+        │   ├── caa45d8a2fe3171fc12302cea7d55078-copia.jpg
+        │   └── caa45d8a2fe3171fc12302cea7d55078.jpg
+        └── varibile-4.sh
+
+499 directories, 1069 files

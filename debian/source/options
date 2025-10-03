@@ -1,1 +1,1 @@
-extend-diff-ignore = "^(dist|irs_dist)/"
+extend-diff-ignore = "^(dist|irs_dist)/"\n

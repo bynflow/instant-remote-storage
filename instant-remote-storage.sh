@@ -962,7 +962,7 @@ main_loop() {
       local SUBPATH
       SUBPATH="${DIR#"$LOCAL_DIR"}"
       SUBPATH="${SUBPATH#/}"
-      rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&v/null || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
+      rclone mkdir "$REMOTE_DIR/$SUBPATH" >/dev/null 2>&1 || log_warning "Cannot create remote dir: '$REMOTE_DIR/$SUBPATH'"
     done < <(find "$LOCAL_DIR" -mindepth 1 -type d -empty -print0 2>/dev/null)
   fi
 

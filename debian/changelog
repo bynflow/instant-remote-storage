@@ -1,3 +1,10 @@
+instant-remote-storage (4.2.0-3) unstable; urgency=medium
+
+  * Fix: correct stderr redirection (use '2>&1') in mkdir path creation;
+    rebuild.
+
+ -- Carlo Capobianchi <bynrflow@gmail.com>  Fri, 03 Oct 2025 10:26:01 +0200
+
 instant-remote-storage (4.2.0-2) unstable; urgency=medium
 
   * Rebuild: Lintian cleanups; packaging-only.
