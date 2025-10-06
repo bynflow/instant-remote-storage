@@ -1,3 +1,10 @@
+instant-remote-storage (4.2.0-6) unstable; urgency=medium
+
+  * Repack orig: drop accidental build artifacts (instant-remote-
+    storage_*).
+
+ -- Carlo Capobianchi <bynrflow@gmail.com>  Mon, 06 Oct 2025 04:42:44 +0200
+
 instant-remote-storage (4.2.0-5) unstable; urgency=medium
 
   * Install systemd unit via dh_installsystemd under
