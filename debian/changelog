@@ -1,9 +1,22 @@
+instant-remote-storage (4.2.0-5) unstable; urgency=medium
+
+  * Install systemd unit via dh_installsystemd under
+    /usr/lib/systemd/system (fix Lintian: aliased-location).
+
+ -- Carlo Capobianchi <bynrflow@gmail.com>  Mon, 06 Oct 2025 01:12:17 +0200
+
+instant-remote-storage (4.2.0-4) unstable; urgency=medium
+
+  * Release to unstable (fix Lintian: unreleased-changes)
+
+ -- Carlo Capobianchi <bynrflow@gmail.com>  Mon, 06 Oct 2025 00:59:45 +0200
+
 instant-remote-storage (4.2.0-3) unstable; urgency=medium
 
   * Fix: correct stderr redirection (use '2>&1') in mkdir path creation;
     rebuild.
 
- -- Carlo Capobianchi <bynrflow@gmail.com>  Fri, 03 Oct 2025 10:26:01 +0200
+ -- Carlo Capobianchi <bynrflow@gmail.com>  Mon, 06 Oct 2025 00:54:45 +0200
 
 instant-remote-storage (4.2.0-2) unstable; urgency=medium
 

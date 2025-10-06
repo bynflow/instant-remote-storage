@@ -1,6 +1,7 @@
+# --- Upstream tarballs ---
 *.orig.tar.*
 
-# Editors / OS
+# --- Editor / OS ---
 *.swp
 *~
 .DS_Store
@@ -8,14 +9,15 @@
 .vscode/
 *.log
 
-# Python/Node accidental
+# --- Accidental deps ---
 node_modules/
 dist/
+irs_dist/
 venv/
 .env
 .env.*
 
-# Build artefacts (Debian & dpkg/apt)
+# --- Build artefacts (Debian/dpkg/sbuild) ---
 *.deb
 *.ddeb
 *.buildinfo
@@ -24,6 +26,17 @@ venv/
 *.dsc
 *.tar.gz
 *.tar.xz
+
+# Unpacked source trees from dget/dpkg-source -x
+instant-remote-storage-*/
+# Occasional orphan files named like 'instant-remote-storage_4.2.0-5'
+instant-remote-storage_[0-9]*
+
+# Local build areas in-repo (prefer fuori-repo, ma nel dubbio)
+build-*/
+build-area/
+
+# --- debian/ transient stuff created by dh ---
 debian/.debhelper/
 debian/*debhelper*
 debian/debhelper-build-stamp
@@ -33,6 +46,8 @@ debian/*/DEBIAN/
 debian/*/usr/share/doc/*/changelog.Debian.gz
 debian/*.substvars
 debian/instant-remote-storage/
+
+# Keep core packaging files tracked
 !debian/changelog
 !debian/control
 !debian/copyright
@@ -42,32 +57,23 @@ debian/instant-remote-storage/
 !debian/man/
 !debian/systemd/
 !debian/docs/
+!debian/install
+!debian/manpages
+!debian/wrapper/**
+!debian/upstream/**
+!debian/instant-remote-storage@.service
 
-# Quilt work dir (se in futuro usi patch/series)
+# --- Quilt work dir ---
 .pc/
 
-# rclone leftovers
+# --- Misc ---
 rclone.conf
-
-# Altri backup comuni (opzionali)
 *.bak
 *.orig
 *.rej
 #*#
 
-# venv locali e direnv
+# Local venv/direnv
 .venv/
 .direnv/
-
-# alberi di build locali se mai li crei dentro al repo
-build-*/
-build-area/
-
-# assicura che alcuni file di packaging restino tracciati anche se in futuro
-# aggiungerai regole più aggressive
-!debian/patches/**
-!debian/install
-!debian/manpages
-!debian/wrapper/**
-!debian/upstream/**
 

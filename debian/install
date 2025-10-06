@@ -2,7 +2,6 @@ debian/docs/README.Debian usr/share/doc/instant-remote-storage/
 debian/irs-setup usr/sbin/
 debian/man/instant-remote-storage.1 usr/share/man/man1/
 debian/man/irs-setup.8 usr/share/man/man8/
-debian/systemd/instant-remote-storage@.service lib/systemd/system/
 debian/wrapper/instant-remote-storage usr/bin/
 instant-remote-storage.sh usr/lib/instant-remote-storage/
 lib/irs_recovery.sh usr/lib/instant-remote-storage/lib/
